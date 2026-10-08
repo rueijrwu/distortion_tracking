@@ -53,7 +53,7 @@ The `real_x_mm` and `real_y_mm` image coordinates are already relative to the ce
 
 ## Existing data and results
 
-The current full sweep is `data\distortion_grid\distortion_grid.pkl`. It was collected with the explicit RC surface selector and per-angle readback checks. All 401 angles completed, with 121 finite rows per angle, no failed edge rays, finite coordinates/distortion values, and zero center distortion. The successful collection and 1 × 5 plot were recorded on 8 October 2026 using CODE V 2024.03 SR1 Build 42748259.
+The current full sweep is `data\distortion_grid\distortion_grid.pkl`. A CSV export with the same nine fields and 48,521 rows is available at `data\distortion_grid\distortion_grid.csv`. It was collected with the explicit RC surface selector and per-angle readback checks. All 401 angles completed, with 121 finite rows per angle, no failed edge rays, finite coordinates/distortion values, and zero center distortion. The successful collection and 1 × 5 plot were recorded on 8 October 2026 using CODE V 2024.03 SR1 Build 42748259.
 
 The selected grid plot is `data\distortion_grid\distortion_grid.png`; it shows RC -10°, -5°, 0°, +5°, and +10° with shared image-coordinate axes. Generate it from the existing pickle without running CODE V:
 

@@ -228,24 +228,27 @@ def analyze(angles: np.ndarray, xy: np.ndarray, distortion: np.ndarray):
 
 def plot_dependencies(angles: np.ndarray, results: dict, path: Path) -> None:
     coord = results["delta_coordinates_mm"]
-    dist = results["delta_distortion_percentage_points"]
-    fig, axes = plt.subplots(2, 2, figsize=(12, 8), sharex=True)
-    specs = ((axes[0, 0], coord[:, :, 0], "Δ image X", "Change from 0° (mm)"),
-             (axes[0, 1], coord[:, :, 1], "Δ image Y", "Change from 0° (mm)"),
-             (axes[1, 0], dist[:, :, 0], "Δ radial distortion", "Change from 0° (percentage points)"),
-             (axes[1, 1], dist[:, :, 1], "Δ tangential distortion", "Change from 0° (percentage points)"))
+    # The stored corner coordinates are already center-referenced at each
+    # rotation. Add the measured center as an explicit, zero-valued fifth point.
+    values_x = np.column_stack((np.zeros(angles.size), coord[:, :, 0]))
+    values_y = np.column_stack((np.zeros(angles.size), coord[:, :, 1]))
+    point_names = ("center", *CORNER_NAMES)
+    colors = plt.get_cmap("tab10").colors[:5]
+    fig, axes = plt.subplots(2, 1, figsize=(10, 8), sharex=True)
+    specs = ((axes[0], values_x, "Horizontal shift ΔX", "Shift from 0° (mm)"),
+             (axes[1], values_y, "Vertical shift ΔY", "Shift from 0° (mm)"))
     for ax, values, title, ylabel in specs:
-        for ci, name in enumerate(CORNER_NAMES):
-            ax.plot(angles, values[:, ci], linewidth=1.2, label=name)
+        for pi, name in enumerate(point_names):
+            ax.plot(angles, values[:, pi], color=colors[pi], linewidth=1.25,
+                    linestyle=":" if pi == 0 else "-", label=name)
         ax.axhline(0, color="0.4", linewidth=0.7)
         ax.axvline(0, color="0.4", linestyle=":", linewidth=0.7)
         ax.set_title(title)
         ax.set_ylabel(ylabel)
         ax.grid(True, color="0.9", linewidth=0.6)
-        ax.legend(frameon=False, ncol=2, fontsize=8)
-    axes[1, 0].set_xlabel("Ground-truth eye rotation (degrees)")
-    axes[1, 1].set_xlabel("Ground-truth eye rotation (degrees)")
-    fig.suptitle("Five-point grid fingerprint relative to RC 0°")
+        ax.legend(frameon=False, ncol=5, fontsize=8)
+    axes[1].set_xlabel("Ground-truth eye rotation (degrees)")
+    fig.suptitle("Five-point fingerprint relative to 0 degrees")
     fig.tight_layout()
     path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(path, dpi=180, bbox_inches="tight")
