@@ -20,9 +20,9 @@ These residuals compare the quadratic fitted to all 401 ground-truth angles with
 
 | Corner coordinate RMSE | MAE | Maximum absolute coordinate error | Corner vector RMSE | Vector error P95 | Maximum vector error |
 |---:|---:|---:|---:|---:|---:|
-| 0.000124609563 mm (0.12461 µm) | 9.27289124e-05 mm (0.0927289 µm) | 0.000642517114 mm (0.642517 µm) | 0.000176224535 mm (0.176225 µm) | 0.000303720503 mm (0.303721 µm) | 0.000713884038 mm (0.713884 µm) |
+| 0.000174110876 mm (0.174111 µm) | 0.000141690501 mm (0.141691 µm) | 0.000746625661 mm (0.746626 µm) | 0.000246229962 mm (0.24623 µm) | 0.000364849639 mm (0.36485 µm) | 0.000850413593 mm (0.850414 µm) |
 
-The largest absolute coordinate residual is 0.642517 µm at top-left Y, θ=-20°.
+The largest absolute coordinate residual is -0.746626 µm at bottom-right Y, θ=+20°.
 
 ## Per-coordinate errors
 
@@ -31,15 +31,15 @@ Values are RMSE / maximum absolute error in µm. The center is included; its ide
 | Point | Axis | RMSE / max absolute error (µm) |
 |---|---|---:|
 | center | X | 0 / 0 |
-| center | Y | 5.05248e-07 / 4.61312e-06 |
-| top-left | X | 0.100871 / 0.31113 |
-| top-left | Y | 0.201238 / 0.642517 |
-| top-right | X | 0.100871 / 0.31113 |
-| top-right | Y | 0.201238 / 0.642517 |
-| bottom-left | X | 0.0359165 / 0.132075 |
-| bottom-left | Y | 0.10074 / 0.362747 |
-| bottom-right | X | 0.0359165 / 0.132075 |
-| bottom-right | Y | 0.10074 / 0.362747 |
+| center | Y | 5.41999e-07 / 3.30397e-06 |
+| top-left | X | 0.123882 / 0.407128 |
+| top-left | Y | 0.212797 / 0.746626 |
+| top-right | X | 0.123882 / 0.407128 |
+| top-right | Y | 0.212797 / 0.746626 |
+| bottom-left | X | 0.123882 / 0.407128 |
+| bottom-left | Y | 0.212797 / 0.746626 |
+| bottom-right | X | 0.123882 / 0.407128 |
+| bottom-right | Y | 0.212797 / 0.746626 |
 
 ## Fitted coefficients
 
@@ -47,15 +47,15 @@ Coefficients use the Theory.md basis `[θ², θ, 1]`. For each coordinate, `dx =
 
 | Point | a_x | b_x | c_x | a_y | b_y | c_y |
 |---|---:|---:|---:|---:|---:|---:|
-| center | 0 | 0 | 0 | -1.2854178e-12 | 1.20020088e-11 | 1.164675e-10 |
-| top-left | -1.53887837e-05 | 0.000494301751 | -2.00104407e-05 | 5.00235694e-05 | -0.0014069078 | 4.70714161e-05 |
-| top-right | 1.53887837e-05 | -0.000494301751 | 2.00104407e-05 | 5.00235694e-05 | -0.0014069078 | 4.70714161e-05 |
-| bottom-left | -1.6517695e-05 | 0.000165260398 | -1.88233503e-05 | -5.52459807e-05 | 0.000730808614 | -4.46763167e-05 |
-| bottom-right | 1.6517695e-05 | -0.000165260398 | 1.88233503e-05 | -5.52459807e-05 | 0.000730808614 | -4.46763167e-05 |
+| center | 0 | 0 | 0 | 5.20612031e-14 | 1.19716996e-11 | -1.96805025e-12 |
+| top-left | -3.02637086e-05 | 0.000607138103 | -3.64754122e-05 | 0.000105593305 | -0.001420507 | 8.44000675e-05 |
+| top-right | 3.02637086e-05 | -0.000607138103 | 3.64754122e-05 | 0.000105593305 | -0.001420507 | 8.44000675e-05 |
+| bottom-left | -3.02637086e-05 | -0.000607138103 | -3.64754122e-05 | -0.000105593305 | -0.001420507 | -8.44000715e-05 |
+| bottom-right | 3.02637086e-05 | 0.000607138103 | 3.64754122e-05 | -0.000105593305 | -0.001420507 | -8.44000715e-05 |
 
 ## Interpretation
 
-Compare these fit residuals with the assumed 1 µm per-coordinate localization noise from the existing eye-rotation study. The corner-coordinate RMSE is 0.125 µm and the maximum absolute error is 0.643 µm. These values describe how closely a quadratic represents the ideal saved sweep. They do not establish rotation-estimation precision and omit detector calibration, alignment, localization bias, and other physical errors.
+Compare these fit residuals with the assumed 1 µm per-coordinate localization noise from the existing eye-rotation study. The corner-coordinate RMSE is 0.174 µm and the maximum absolute error is 0.747 µm. These values describe how closely a quadratic represents the ideal saved sweep. They do not establish rotation-estimation precision and omit detector calibration, alignment, localization bias, and other physical errors.
 
 ## Files
 

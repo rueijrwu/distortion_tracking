@@ -30,6 +30,7 @@ POINT_ORDER = ("center", *CORNER_NAMES)
 SCALED_BASIS = ("(theta/20)^2", "theta/20", "constant")
 PHYSICAL_BASIS = ("theta_squared", "theta", "constant")
 ANGLE_SCALE_DEG = 20.0
+DEG_TO_ARCMIN = 60.0
 SIGMA_MM = (0.001,)  # assumed 1 micrometre standard deviation per X/Y coordinate
 SEED = 20261008
 REQUIRED_FIELDS = (
@@ -431,28 +432,29 @@ def plot_dependencies(angles: np.ndarray, results: dict, path: Path) -> None:
 def plot_precision(angles: np.ndarray, results: dict, path: Path) -> None:
     fig, axes = plt.subplots(1, 3, figsize=(16, 4.8))
     sigma = SIGMA_MM[0]
-    values = results["fisher_sigma_deg"][sigma]
-    axes[0].plot(angles, values * 1000, label=f"σ={sigma*1000:g} µm per coordinate")
+    values = results["fisher_sigma_deg"][sigma] * DEG_TO_ARCMIN
+    axes[0].plot(angles, values, label=f"sigma={sigma*1000:g} um per coordinate")
     axes[0].set_title("Local Fisher estimate")
     axes[0].set_xlabel("Ground-truth eye rotation (degrees)")
-    axes[0].set_ylabel("Local 1σ angle uncertainty (millidegrees)")
+    axes[0].set_ylabel("Local 1-sigma angle uncertainty (arcmin)")
     axes[0].grid(True, color="0.9", linewidth=0.6)
     axes[0].legend(frameon=False)
     mc = results["monte_carlo"][sigma]
-    axes[1].plot(mc["truth_angles_deg"], mc["per_truth_median_abs_error_deg"],
+    axes[1].plot(mc["truth_angles_deg"], mc["per_truth_median_abs_error_deg"] * DEG_TO_ARCMIN,
                  label="Per-angle median", linewidth=1.1)
-    axes[1].plot(mc["truth_angles_deg"], mc["per_truth_p95_abs_error_deg"],
+    axes[1].plot(mc["truth_angles_deg"], mc["per_truth_p95_abs_error_deg"] * DEG_TO_ARCMIN,
                  label="Per-angle 95th percentile", linewidth=1.1)
     axes[1].set_title("Error varies by true angle")
     axes[1].set_xlabel("Ground-truth eye rotation (degrees)")
-    axes[1].set_ylabel("Absolute angle error (degrees)")
+    axes[1].set_ylabel("Absolute angle error (arcmin)")
     axes[1].grid(True, color="0.9", linewidth=0.6)
     axes[1].legend(frameon=False)
-    axes[2].bar([0, 1], [mc["median_abs_error_deg"], mc["p95_abs_error_deg"]],
+    axes[2].bar([0, 1], [mc["median_abs_error_deg"] * DEG_TO_ARCMIN,
+                         mc["p95_abs_error_deg"] * DEG_TO_ARCMIN],
                 color=["#1769aa", "#e07a24"])
     axes[2].set_xticks([0, 1], ["Median", "95th percentile"])
     axes[2].set_title("Pooled 10,100-trial errors")
-    axes[2].set_ylabel("Absolute angle error (degrees)")
+    axes[2].set_ylabel("Absolute angle error (arcmin)")
     axes[2].grid(True, axis="y", color="0.9", linewidth=0.6)
     fig.suptitle("Idealized precision from the quadratic five-point estimator")
     fig.tight_layout()
@@ -466,7 +468,7 @@ def write_report(path: Path, angles: np.ndarray, results: dict) -> None:
     coordinates = results["delta_coordinates_mm"]
     distortion = results["delta_distortion_percentage_points"]
     mc = results["monte_carlo"][SIGMA_MM[0]]
-    fisher = results["fisher_sigma_deg"][SIGMA_MM[0]]
+    fisher = results["fisher_sigma_deg"][SIGMA_MM[0]] * DEG_TO_ARCMIN
     fit = results["forward_model_fit_metrics"]
     bias = results["polynomial_noiseless_bias_deg"]
 
@@ -478,7 +480,7 @@ def write_report(path: Path, angles: np.ndarray, results: dict) -> None:
     peak_y = peak(coordinates[:, :, 1])
     peak_radial = peak(distortion[:, :, 0])
     peak_tangential = peak(distortion[:, :, 1])
-    per_angle_p95 = mc["per_truth_p95_abs_error_deg"]
+    per_angle_p95 = mc["per_truth_p95_abs_error_deg"] * DEG_TO_ARCMIN
     worst_p95_index = int(np.argmax(per_angle_p95))
     fisher_best_idx = int(np.argmin(fisher))
     fisher_worst_idx = int(np.argmax(fisher))
@@ -487,6 +489,8 @@ def write_report(path: Path, angles: np.ndarray, results: dict) -> None:
     metadata = results["model_metadata"]
     lines = [
         "# Five-point eye-rotation analysis with a quadratic forward model", "",
+        "**All estimation-error and precision values are in arcminutes (arcmin), with 1 degree = 60 arcmin. "
+        "Truth and estimated rotation values remain in degrees.**",
         "## Data and model", "",
         f"The analysis uses {angles.size} CODE V ground-truth rotations from {angles[0]:g} to "
         f"{angles[-1]:g} degrees in {np.median(np.diff(angles)):.6g}-degree steps.",
@@ -515,8 +519,9 @@ def write_report(path: Path, angles: np.ndarray, results: dict) -> None:
         "objective over the bounded interval, independent of angle-template spacing.",
         "", "## Noiseless inversion", "",
         f"Inverting all {angles.size} exact CODE V corner patterns gives median absolute angle bias "
-        f"{np.median(bias_abs):.6g} degrees, P95 {np.percentile(bias_abs, 95):.6g} degrees, and maximum "
-        f"{bias_abs[bias_worst_idx]:.6g} degrees at truth {angles[bias_worst_idx]:+g} degrees "
+        f"{np.median(bias_abs)*DEG_TO_ARCMIN:.6g} arcmin, P95 "
+        f"{np.percentile(bias_abs, 95)*DEG_TO_ARCMIN:.6g} arcmin, and maximum "
+        f"{bias_abs[bias_worst_idx]*DEG_TO_ARCMIN:.6g} arcmin at truth {angles[bias_worst_idx]:+g} degrees "
         f"(estimate {results['polynomial_noiseless_estimates_deg'][bias_worst_idx]:+g} degrees). "
         "This bias comes from the quadratic approximation to the CODE V response. It is distinct from the "
         "sub-micrometer forward coordinate residual above.",
@@ -532,17 +537,18 @@ def write_report(path: Path, angles: np.ndarray, results: dict) -> None:
         "Assume independent Gaussian noise with standard deviation 0.001 mm (1 um) on each X and Y "
         "coordinate of all five absolute points, including the center. The seeded Monte Carlo uses 101 true "
         "angles, 100 trials per angle, and exact CODE V coordinates as the noise-free means. Thus results "
-        "include both coordinate noise and quadratic approximation bias.",
+        "include both coordinate noise and quadratic approximation bias. Error thresholds of 60 and 300 arcmin "
+        "correspond to 1 and 5 degrees, respectively.",
         "", "| Statistic | Result |", "|---|---:|",
-        f"| Median absolute angle error | {mc['median_abs_error_deg']:.6g} degrees |",
-        f"| Pooled 95th-percentile absolute angle error | {mc['p95_abs_error_deg']:.6g} degrees |",
-        f"| RMSE | {mc['rmse_deg']:.6g} degrees |",
-        f"| Maximum absolute error | {mc['max_abs_error_deg']:.6g} degrees |",
-        f"| Trials above 1 degree | {100*mc['fraction_over_1deg']:.4g}% |",
-        f"| Trials above 5 degrees | {100*mc['fraction_over_5deg']:.4g}% |",
+        f"| Median absolute angle error | {mc['median_abs_error_deg']*DEG_TO_ARCMIN:.6g} arcmin |",
+        f"| Pooled 95th-percentile absolute angle error | {mc['p95_abs_error_deg']*DEG_TO_ARCMIN:.6g} arcmin |",
+        f"| RMSE | {mc['rmse_deg']*DEG_TO_ARCMIN:.6g} arcmin |",
+        f"| Maximum absolute error | {mc['max_abs_error_deg']*DEG_TO_ARCMIN:.6g} arcmin |",
+        f"| Trials above 60 arcmin (1 degree) | {100*mc['fraction_over_1deg']:.4g}% |",
+        f"| Trials above 300 arcmin (5 degrees) | {100*mc['fraction_over_5deg']:.4g}% |",
         f"| Endpoint clamp rate (-20 / +20 degrees) | {100*mc['lower_clamp_fraction']:.4g}% / {100*mc['upper_clamp_fraction']:.4g}% |",
-        f"| Worst per-angle P95 | {np.max(per_angle_p95):.6g} degrees at {mc['truth_angles_deg'][worst_p95_index]:+g} degrees |",
-        f"| Local Fisher 1-sigma range | {np.min(fisher):.6g} to {np.max(fisher):.6g} degrees |",
+        f"| Worst per-angle P95 | {np.max(per_angle_p95):.6g} arcmin at {mc['truth_angles_deg'][worst_p95_index]:+g} degrees |",
+        f"| Local Fisher 1-sigma range | {np.min(fisher):.6g} to {np.max(fisher):.6g} arcmin |",
         f"| Best / worst local Fisher angle | {angles[fisher_best_idx]:+g} / {angles[fisher_worst_idx]:+g} degrees |",
         "", "The pooled and per-angle Monte Carlo percentiles have finite-sample uncertainty. The local Fisher "
         "estimate describes small errors near the true angle and does not capture wrong-branch outcomes. "

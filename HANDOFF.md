@@ -46,7 +46,7 @@ S_RC = "s\"RC\""
 
 The collector sets the requested `ADE`, runs `set vig`, reads `(ade s"RC")` back for every angle, and stops if CODE V reports an error or the readback does not match. Do not shorten the command to `ade "RC"`; that earlier form failed to select the intended surface and produced misleading, angle-invariant results. The collector starts CODE V once, loads the lens sequence, traces the grid for each requested angle, and cleans up with `StopCodeV()` and `pythoncom.CoUninitialize()`.
 
-The completed sweep uses 401 rotations from -20° to +20° in 0.1° increments and an 11 × 11 field grid at each rotation. Its pickle has 48,521 records (121 per angle), stored as a one-dimensional structured NumPy array with these nine `float64` fields:
+The current sweep uses 401 rotations from -20° to +20° in 0.1° increments and a 3 × 3 field grid at each rotation. The nine nodes include the center and four corners used by the five-point estimator. Its pickle has 3,609 records (9 per angle), stored as a one-dimensional structured NumPy array with these nine `float64` fields:
 
 `eye_rotation_deg`, `field_x_relative`, `field_y_relative`, `paraxial_x_mm`, `paraxial_y_mm`, `real_x_mm`, `real_y_mm`, `radial_distortion_pct`, `tangential_distortion_pct`.
 
@@ -54,7 +54,7 @@ The `real_x_mm` and `real_y_mm` image coordinates are already relative to the ce
 
 ## Existing data and results
 
-The current full sweep is `data\distortion_grid\distortion_grid.pkl`. A CSV export with the same nine fields and 48,521 rows is available at `data\distortion_grid\distortion_grid.csv`. It was collected with the explicit RC surface selector and per-angle readback checks. All 401 angles completed, with 121 finite rows per angle, no failed edge rays, finite coordinates/distortion values, and zero center distortion. The successful collection and 1 × 5 plot were recorded on 8 October 2026 using CODE V 2024.03 SR1 Build 42748259.
+The current full sweep is `data\distortion_grid\distortion_grid.pkl`. A CSV export with the same nine fields and 3,609 rows is available at `data\distortion_grid\distortion_grid.csv`. It was collected after the optical setup changed, with the explicit RC surface selector and per-angle readback checks. All 401 angles completed, with 9 finite rows per angle, including all four corners and the center. The other four nodes are the edge midpoints. All coordinates and distortion values are finite.
 
 The selected grid plot is `data\distortion_grid\distortion_grid.png`; it shows RC -10°, -5°, 0°, +5°, and +10° with shared image-coordinate axes. Generate it from the existing pickle without running CODE V:
 
@@ -68,7 +68,7 @@ The baseline distortion comparison is saved in `data\distortion_grid\distortion_
 & $distortionPython -u Script\analyze_distortion.py
 ```
 
-The five-point study outputs are in `data\eye_rotation_analysis\`: `report.md`, `eye_rotation_observability.pkl`, `dependencies_vs_rotation.png`, and `precision_estimates.png`. Recreate them with the saved quadratic fit using:
+The five-point study outputs are in `data\eye_rotation_analysis\`: `report.md`, `eye_rotation_observability.pkl`, `dependencies_vs_rotation.png`, and `precision_estimates.png`. The 1 × 5 grid plot infers the 3 × 3 layout from the pickle and shows RC -10°, -5°, 0°, +5°, and +10°. Recreate the study with the saved quadratic fit using:
 
 ```powershell
 & $distortionPython -u Script\analyze_eye_rotation.py
@@ -82,15 +82,15 @@ The 1 µm study assumes independent Gaussian noise with standard deviation 0.001
 
 | Measure | Result |
 |---|---:|
-| Noiseless median / P95 / maximum absolute bias | 0.0892991° / 0.385127° / 0.432722° (maximum at +8°) |
-| Median absolute error with 1 µm coordinate noise | 0.275162° |
-| Pooled 95th-percentile absolute error | 1.85545° |
-| RMSE | 0.90666° |
-| Trials with error greater than 1° | 13.7% |
-| Trials with error greater than 5° | 0.406% |
-| Largest observed error | 14.3954° (truth +17.2°, estimate +2.80456°) |
-| Worst per-angle 95th percentile | 5.23959° at truth +7.6° |
-| Endpoint clamp rate (-20° / +20°) | 0.099% / 1.06% |
+| Noiseless median / P95 / maximum absolute bias | 2.22169 / 3.22499 / 4.17571 arcmin (maximum at +20°) |
+| Median absolute error with 1 µm coordinate noise | 8.79205 arcmin |
+| Pooled 95th-percentile absolute error | 36.6595 arcmin |
+| RMSE | 17.2944 arcmin |
+| Trials with error greater than 1° | 0.7822% |
+| Trials with error greater than 5° | 0% |
+| Largest observed error | 111.015 arcmin (truth +0.8°, estimate +2.65025°) |
+| Worst per-angle 95th percentile | 68.0692 arcmin at truth +0.4° |
+| Endpoint clamp rate (-20° / +20°) | 0.2079% / 0.2376% |
 
 Performance varies greatly with true angle. The 0.1° sweep spacing is the ground-truth data sampling interval, not a demonstrated measurement accuracy. The polynomial inverse is continuous in angle, but the reported noise study does not establish sub-sample hardware precision. The center anchors the absolute measurement; after center subtraction, it adds no independent angle feature in this dataset, and its measurement noise is shared across all four relative corners.
 
@@ -108,13 +108,13 @@ Recreate those outputs without running CODE V:
 & $distortionPython -u Script\fit_polynomial_distortion.py
 ```
 
-Latest full-sweep fit: corner-coordinate RMSE 0.12461 µm, MAE 0.09273 µm, and maximum absolute coordinate residual 0.642517 µm at top-left Y and -20°. The vector RMSE is 0.176225 µm. These deterministic model residuals are below the assumed 1 µm per-coordinate localization noise; they describe the forward coordinate fit and are separate from angle-estimation error. The quadratic inverse has now been evaluated in `data\eye_rotation_analysis\report.md`; it returns continuous angles by global weighted residual minimization.
+Latest full-sweep fit for the changed optical setup: corner-coordinate RMSE 0.174111 µm, MAE 0.141691 µm, and maximum absolute coordinate residual 0.746626 µm at bottom-right Y and +20°. The vector RMSE is 0.246230 µm. These deterministic model residuals are below the assumed 1 µm per-coordinate localization noise; they describe the forward coordinate fit and are separate from angle-estimation error. The refreshed quadratic inverse results are in `data\eye_rotation_analysis\report.md`; the results there are in arcminutes and it returns continuous angles by global weighted residual minimization.
 
 ## Validation and historical artifacts
 
 The corrected full sweep's per-angle ADE readbacks and finite records are the relevant collection validation. Earlier collector runs and the earlier purported `dist.seq` match are invalid as eye-rotation validation because the command omitted the explicit RC surface selector; do not use those results.
 
-`data\distortion_grid\distortion_grid.svg` and `data\distortion_grid\validation_report.md` are historical outputs from the earlier workflow. They predate the corrected collector and are not evidence for the 401-angle rotation sweep. The scripts do not delete old outputs automatically. A matching macro comparison has not been completed for the corrected collector.
+`data\distortion_grid\distortion_grid.svg` and `data\distortion_grid\validation_report.md` are historical outputs and predate the current optical setup; do not use them as current results. The previous 11 × 11 pickle, fit, and noise-analysis results were replaced by the current 3 × 3 sweep and regenerated downstream outputs. The scripts do not delete old outputs automatically. A matching macro comparison has not been completed for the current collector.
 
 ## Resume checklist
 
