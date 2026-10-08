@@ -4,7 +4,7 @@
 
 Estimate one-axis eye rotation from five detected image points: the center and the top-left, top-right, bottom-left, and bottom-right grid points. The CODE V sweep provides ground-truth rotation labels and the ideal image coordinates for calibration. The main question is how accurately rotation can be estimated when the five point coordinates are noisy.
 
-The current five-point estimator uses the four corner coordinates relative to the measured center. It matches that eight-value X/Y pattern to the saved angle sweep with a weighted piecewise-linear least-squares fit. It does not yet use a polynomial. `Theory.md` describes a proposed quadratic forward model for discussion; agree on the modeled quantity and fitting approach before changing the estimator.
+The current five-point inverse estimator uses the four corner coordinates relative to the measured center. It matches that eight-value X/Y pattern to the saved angle sweep with a weighted piecewise-linear least-squares fit. The quadratic forward model has been fit to the five-point shifts from the ground-truth sweep as described in `Theory.md`; the polynomial has not replaced the inverse estimator.
 
 ## Project files
 
@@ -13,9 +13,10 @@ The current five-point estimator uses the four corner coordinates relative to th
 - `Script/plot_distortion_grid.py`: plots selected rotations from the pickle using Matplotlib; it does not start CODE V.
 - `Script/analyze_distortion.py`: compares radial and tangential distortion percentages with their values at RC 0 degrees.
 - `Script/analyze_eye_rotation.py`: studies five-point rotation observability and 1 µm coordinate-noise performance; it reads the sweep and does not start CODE V.
+- `Script/fit_polynomial_distortion.py`: fits the Theory.md quadratic forward model from the saved ground-truth pickle and reports full-sweep fit errors; it does not start CODE V.
 - `Script/codev_startup_check.py`: optional CODE V COM startup check.
 - `Script/raytracing.py`: original COM/ray-tracing reference, including the required `S_RC = "s\"RC\""` surface selector.
-- `Theory.md`: proposed quadratic forward-model notation and open modeling considerations. No polynomial estimator has been implemented.
+- `Theory.md`: quadratic forward-model notation, measured fit results, and rotation-estimation considerations. The forward polynomial is implemented for evaluation; the rotation inverse remains the piecewise-linear template method.
 - `AGENTS.md`: project-specific environment and CODE V workflow instructions.
 
 ## Python environment
@@ -91,15 +92,21 @@ Performance varies greatly with true angle. The 0.1° grid spacing and interpola
 
 The study's leave-one-out interpolation error (median 0.000430581°, maximum 0.00117622°) measures noiseless template interpolation/discretization only. It is not a precision estimate.
 
-## Polynomial model discussion
+## Quadratic forward-model fit
 
-`Theory.md` defines a candidate quadratic forward model for each point's image-coordinate shift from RC 0°:
+`Script/fit_polynomial_distortion.py` fits the evaluated forward model in `Theory.md` from `data\distortion_grid\distortion_grid.pkl`. It models each point's center-relative real image-coordinate shift from the RC 0° pattern in millimeters:
 
 `Δ_i(θ) = [θ², θ, 1] C_i`, where `Δ_i = [dx_i, dy_i]`.
 
-The ground-truth sweep can fit the coefficient matrix by least squares. Because the shift is defined relative to 0°, it should satisfy `Δ_i(0) = 0`; a quadratic model can enforce this by omitting the constant term. The basis `[θ³, θ², θ, 1]` is cubic, not quadratic. No polynomial coefficients or polynomial inverse are currently used by the analysis scripts.
+The fit scales angle as `t=θ/20` for numerical stability, uses `numpy.linalg.lstsq`, and saves the coefficients converted to the physical `[θ², θ, 1]` basis. It fits all 401 ground-truth rotations and reports the residual between the fitted model and those same samples. Outputs are written to `data\polynomial_distortion_fit\`: `report.md`, `polynomial_distortion_fit.pkl`, `truth_vs_quadratic.png`, and `quadratic_residuals.png`.
 
-Before implementing a polynomial estimator, settle whether the modeled feature is center-relative real image coordinate shift in millimeters or a radial/tangential distortion change in percentage points. The current five-point estimator uses the former. Then compare polynomial forward-fit residuals and held-out angle estimates against the current template method using the same noise assumptions. A good forward fit alone does not establish inverse precision or eliminate ambiguity where different angles produce similar patterns.
+Recreate those outputs without running CODE V:
+
+```powershell
+& $distortionPython -u Script\fit_polynomial_distortion.py
+```
+
+Latest full-sweep fit: corner-coordinate RMSE 0.12461 µm, MAE 0.09273 µm, and maximum absolute coordinate residual 0.642517 µm at top-left Y and -20°. The vector RMSE is 0.176225 µm. These deterministic model residuals are below the assumed 1 µm per-coordinate localization noise and describe how well the quadratic approximates this same sweep; they do not establish eye-rotation precision. The existing piecewise-linear inverse in `analyze_eye_rotation.py` remains unchanged; a polynomial inverse and its angle-estimation precision have not been evaluated.
 
 ## Validation and historical artifacts
 
@@ -109,10 +116,9 @@ The corrected full sweep's per-angle ADE readbacks and finite records are the re
 
 ## Resume checklist
 
-1. Read `AGENTS.md` and `Theory.md`, then review `data\eye_rotation_analysis\report.md`.
-2. Use the existing corrected `distortion_grid.pkl` for further analysis; it is already the ground-truth sweep.
-3. Discuss and agree on the polynomial's modeled quantity and baseline constraint before changing the estimator.
-4. Keep the current scope to one-axis RC rotation and the five identified grid points unless the user expands it.
+1. Review `data\polynomial_distortion_fit\report.md` and residual plots to assess whether the forward quadratic is adequate for the intended noise level.
+2. If proceeding with a polynomial inverse, evaluate angle-estimation error with the same five-point, 1 µm noise assumptions and compare against the current piecewise-linear estimator.
+3. Keep the current scope to one-axis RC rotation and the five identified grid points unless the user expands it.
 
 Only rerun CODE V collection if the sweep needs regeneration or settings change. To collect the default 401-angle sweep:
 
