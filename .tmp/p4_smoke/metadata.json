@@ -1,0 +1,97 @@
+{
+  "model": "Lens\\p4_ME.len",
+  "model_sha256": "5e0715c70016fbcec8a49956dd2ec824a50f5c4c52ca472b0225a2523db614ac",
+  "zoom": "z1 (P4)",
+  "rotation_deg": [
+    -20.0,
+    0.0,
+    20.0
+  ],
+  "accommodation_d": [
+    0.0,
+    2.5,
+    5.0
+  ],
+  "grid_lines": 3,
+  "fields": [
+    "eye_rotation_deg",
+    "accommodation_d",
+    "field_x_relative",
+    "field_y_relative",
+    "paraxial_x_mm",
+    "paraxial_y_mm",
+    "real_x_mm",
+    "real_y_mm",
+    "radial_distortion_pct",
+    "tangential_distortion_pct"
+  ],
+  "completed_groups": [
+    {
+      "accommodation_d": 0.0,
+      "record_count": 27,
+      "geometry_baseline": {
+        "aqueous_thickness_mm": 3.15,
+        "lens_thickness_mm": 3.6,
+        "lens_f_radius_mm": 11.48,
+        "lens_b_radius_mm": -5.9,
+        "lens_f_conic": -5.0,
+        "lens_b_conic": -2.0,
+        "lens_semi_ap_mm": 5.0
+      },
+      "geometry_target": {
+        "aqueous_thickness_mm": 3.15,
+        "lens_thickness_mm": 3.6,
+        "lens_f_radius_mm": 11.48,
+        "lens_b_radius_mm": -5.9,
+        "lens_f_conic": -5.0,
+        "lens_b_conic": -2.0,
+        "lens_semi_ap_mm": 5.0
+      }
+    },
+    {
+      "accommodation_d": 2.5,
+      "record_count": 27,
+      "geometry_baseline": {
+        "aqueous_thickness_mm": 3.15,
+        "lens_thickness_mm": 3.6,
+        "lens_f_radius_mm": 11.48,
+        "lens_b_radius_mm": -5.9,
+        "lens_f_conic": -5.0,
+        "lens_b_conic": -2.0,
+        "lens_semi_ap_mm": 5.0
+      },
+      "geometry_target": {
+        "aqueous_thickness_mm": 3.05,
+        "lens_thickness_mm": 3.75,
+        "lens_f_radius_mm": 9.855,
+        "lens_b_radius_mm": -5.4750000000000005,
+        "lens_f_conic": -6.0,
+        "lens_b_conic": -2.625,
+        "lens_semi_ap_mm": 4.727979787565068
+      }
+    },
+    {
+      "accommodation_d": 5.0,
+      "record_count": 27,
+      "geometry_baseline": {
+        "aqueous_thickness_mm": 3.15,
+        "lens_thickness_mm": 3.6,
+        "lens_f_radius_mm": 11.48,
+        "lens_b_radius_mm": -5.9,
+        "lens_f_conic": -5.0,
+        "lens_b_conic": -2.0,
+        "lens_semi_ap_mm": 5.0
+      },
+      "geometry_target": {
+        "aqueous_thickness_mm": 2.9499999999999997,
+        "lens_thickness_mm": 3.9,
+        "lens_f_radius_mm": 8.23,
+        "lens_b_radius_mm": -5.050000000000001,
+        "lens_f_conic": -7.0,
+        "lens_b_conic": -3.25,
+        "lens_semi_ap_mm": 4.523091050931871
+      }
+    }
+  ],
+  "total_records_checkpointed": 81
+}

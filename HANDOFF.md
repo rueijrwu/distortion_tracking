@@ -122,7 +122,7 @@ The corrected full sweep's per-angle ADE readbacks and finite records are the re
 2. For further work, compare physical measurements with the conditional 1 µm model results and assess calibration, alignment, and point-localization systematics.
 3. Keep the current scope to one-axis RC rotation and the five identified grid points unless the user expands it.
 
-Only rerun CODE V collection if the sweep needs regeneration or settings change. To collect the default 401-angle sweep:
+Only rerun CODE V collection if the sweep needs regeneration or settings change. To collect the default P1 401-angle sweep:
 
 ```powershell
 & $distortionPython -u Script\distortion_grid.py
@@ -134,4 +134,18 @@ For a small smoke run that writes to the system temporary folder:
 & $distortionPython -u Script\distortion_grid.py --rotation-min 0 --rotation-count 1 --grid-lines 3 --output-dir "$env:TEMP\distortion_grid_check"
 ```
 
-The collector needs Windows, CODE V, a working license, and `pywin32`. Its default output is `data\distortion_grid\distortion_grid.pkl`; all script paths otherwise resolve relative to the project.
+## P4 accommodation distortion grid
+
+`Script\distortion_grid_p4.py` collects the P4 model over both accommodation and RC eye rotation. It loads `Lens\p4_ME.len` with CODE V `RES`, targets zoom `z1` (P4), and leaves the second zoom (ME) out of the sweep. The default is 51 accommodation values from 0 to 5 D in 0.1 D steps, 401 RC rotations from -20° to +20° in 0.1° steps, and a 3 × 3 field grid. The completed sweep contains 184,059 rows (9 grid points for each accommodation/rotation state) in `data\distortion_grid_p4\distortion_grid.pkl`. Its metadata in `metadata.json` records the lens hash, settings, baselines, and completed groups. After each accommodation group, the collector writes the pickle and metadata through separate atomic file replacements; the pair is not replaced as one transaction. Resume validates both files against the requested sweep and lens hash before continuing.
+
+Accommodation geometry follows `Script\raytracing.py`: the z1 `CorneaB` and `LensF` thicknesses, `LensF` and `LensB` radii and conics, and GRIN coefficients are set from the pristine lens baseline for each accommodation value. The collector checks geometry readbacks, uses the explicit RC selector `s\"RC\"` and verifies each requested ADE, then traces the same relative 3 × 3 grid. It appends `accommodation_d` to the existing structured grid fields. Plot one accommodation group without starting CODE V using:
+
+The completed collection verified all 20,451 accommodation/rotation states, with nine distinct points per state and all ten numeric fields finite. It includes the center, four corners, and four edge-midpoint fields. CODE V verified the requested RC ADE readback at each rotation. The saved lens SHA-256 is recorded in the metadata alongside all 51 completed accommodation groups.
+
+```powershell
+& $distortionPython -u Script\plot_distortion_grid_p4.py --accommodation 0
+```
+
+The default plot is one row of five panels at RC -10°, -5°, 0°, +5°, and +10°. Each panel overlays accommodation 0, 2, and 4 D in distinct colors, with dashed reference grids and solid real image grids. All panels share image-coordinate bounds and equal aspect. It is saved as `data\distortion_grid_p4\distortion_grid.png`. Choose another set of D values with `--accommodations`, or one value with `--accommodation`; selected rotations and output path can be set with `--rotations` and `--output`. If a run stops after one or more accommodation groups, continue with the same sweep settings using `--resume`; the checkpoint's model hash and configuration are checked before it continues.
+
+The P1 collector needs Windows, CODE V, a working license, and `pywin32`; its default output is `data\distortion_grid\distortion_grid.pkl`. The P4 collector uses the separate `data\distortion_grid_p4\distortion_grid.pkl` output path. All script paths otherwise resolve relative to the project.
