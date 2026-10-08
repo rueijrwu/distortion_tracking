@@ -1,35 +1,44 @@
-# Five-point eye-rotation observability
+# Five-point eye-rotation analysis with a quadratic forward model
 
-## Data and method
+## Data and model
 
-Read 401 ground-truth rotations from -20° to 20° in 0.1° steps, using four corner fields plus the center.
-The collector already subtracts the center ray at each rotation. The center is therefore an anchor for measured coordinates; its absolute translation carries no rotation information in this saved dataset. The inverse uses the four corner coordinates relative to the measured center.
-The four corners are top-left, top-right, bottom-left, and bottom-right at relative fields (-1,+1), (+1,+1), (-1,-1), and (+1,-1). Their image X/Y coordinates form an eight-value fingerprint.
-The fingerprint plot shows only five-point image-coordinate shifts in millimeters relative to 0°; radial and tangential distortion percentages are not shown in that plot.
+The analysis uses 401 CODE V ground-truth rotations from -20 to 20 degrees in 0.1-degree steps.
+The measured points are ordered center, top-left, top-right, bottom-left, bottom-right. The sweep coordinates already subtract the optical center at each rotation, so the center anchors the absolute measurements while the four relative corner X/Y values carry the angle pattern.
+The model comes from `C:\Users\rueijrwu\OneDrive\Project\DistortionTracking\data\polynomial_distortion_fit\polynomial_distortion_fit.pkl`. Its scaled basis is `(theta/20)^2, theta/20, 1`, with coefficient order `(power, point, x/y)`, powers `t^2, t, constant`, and points center/TL/TR/BL/BR. The artifact also stores physical coefficients in `[theta^2, theta, 1]` order. Both bases and point order were checked against the artifact predictions (maximum differences 0 mm scaled and 1.39e-17 mm physical).
+Full-sweep forward coordinate residual: corner RMSE 0.12461 um, MAE 0.0927289 um, and maximum absolute residual 0.642517 um. These are forward coordinate fit errors, not rotation errors.
 
-## Dependence and ambiguity
+## Inverse
 
-Closest pair of fingerprints separated by at least 1°: RC +9.5° and +10.5°, center-corrected weighted RMS separation 0.000173728741 mm per coordinate feature. This checks sampled global ambiguity; finite measurement noise can still cause errors.
-Largest absolute corner-coordinate changes from 0° are ΔX=-0.0157504 mm at RC -20° (top-left) and ΔY=0.0475521 mm at RC -20° (top-left). Largest absolute distortion changes are radial 0.683985 pp at RC +20° (bottom-left) and tangential -0.281402 pp at RC +20° (bottom-left).
-Leave-one-out piecewise-linear template inversion across interior sweep samples gives median absolute error 0.000430581072° and maximum 0.00117621646°. This is interpolation/model discretization error for noiseless synthetic templates, not sensor precision.
+For a measured five-point set, subtract the measured center from each corner and subtract the zero-degree corner positions. Fit the resulting four-by-two shift to the quadratic forward model.
+With independent noise on the five absolute point coordinates, center subtraction gives each axis corner covariance `sigma^2 (I + 11^T)`. The weighted least-squares precision matrix is `W = I - 11^T/5` for each axis.
+The objective is quartic in normalized angle `t=theta/20`, so its derivative is cubic. The inverse evaluates every real stationary root within the angle bounds and both endpoints, then chooses the candidate with the smallest weighted residual. This is a global minimization of the fitted quadratic objective over the bounded interval, without interpolation between angle templates.
 
-## Conditional precision
+## Noiseless inversion
 
-Assume independent, isotropic Gaussian X/Y errors on all five absolute measured points, with σ = 0.001 mm (1 µm standard deviation) for each individual X and Y coordinate, including the center. After subtracting the noisy center, each coordinate's four-corner covariance is σ²(I + 11ᵀ); its inverse apart from σ² is I - 11ᵀ/5. The local Fisher estimate uses the numerical derivative of the sampled corner fingerprint.
-The Monte Carlo study uses seed 20261008, 101 evenly spaced ground-truth angles, and 100 trials per angle and noise level. It simulates errors on all five points and fits the piecewise-linear sweep by weighted least squares. The empirical percentiles have Monte Carlo sampling uncertainty because this is a finite 10,100-trial sample. This assumes the optical model/templates are exact and the five field identities are known; it omits detector calibration, alignment, and other systematic errors.
-All 401 sampled templates are distinct. This does not prove the underlying continuous physical mapping is injective between samples.
-Across all 10,100 trials, 13.4% exceed 1° absolute error and 0.485% exceed 5°. The largest observed error is 14.5486° (truth +17.2°, estimate +2.65139°). Per-angle median errors range 0.02644–1.41132°; per-angle 95th percentiles range 0.232894–5.53341°, with the worst at truth RC +7.6°. The pooled Monte Carlo percentile is not a guaranteed error bound at every eye rotation.
+Inverting all 401 exact CODE V corner patterns gives median absolute angle bias 0.0892991 degrees, P95 0.385127 degrees, and maximum 0.432722 degrees at truth +8 degrees (estimate +8.43272 degrees). This bias comes from the quadratic approximation to the CODE V response. It is distinct from the sub-micrometer forward coordinate residual above.
+Largest absolute coordinate changes from 0 degrees are dX=-0.0157504 mm at -20 degrees (top-left) and dY=0.0475521 mm at -20 degrees (top-left). Largest radial/tangential distortion changes are 0.683985 and -0.281402 percentage points. These distortion values are diagnostic only; the rotation inverse uses image coordinates.
+The closest sampled ground-truth corner patterns at least 1 degree apart are +9.5 and +10.5 degrees, with center-corrected weighted RMS separation 0.000173729 mm per coordinate feature.
 
-| Assumed per-coordinate point noise | Fisher 1σ range over sweep | Monte Carlo median | Monte Carlo 95th percentile | Monte Carlo RMSE | Max error | Endpoint clamp rate (−20° / +20°) |
-|---:|---:|---:|---:|---:|---:|---:|
-| 1 µm/coordinate | 0.159841–2.03503° | 0.258893° | 1.89326° | 0.924109° | 14.5486° | 0.416% / 0.703% |
-At 1 µm per coordinate, the local Fisher 1σ estimate is best at RC -20° (0.159841°) and worst at RC +10° (2.03503°).
+## Conditional 1 um coordinate-noise precision
 
-## Limits
+Assume independent Gaussian noise with standard deviation 0.001 mm (1 um) on each X and Y coordinate of all five absolute points, including the center. The seeded Monte Carlo uses 101 true angles, 100 trials per angle, and exact CODE V coordinates as the noise-free means. Thus results include both coordinate noise and quadratic approximation bias.
 
-These are conditional numerical results from the existing CODE V sweep, not measured hardware precision. Actual accuracy depends on point-localization noise, calibration, alignment, model error, and whether the five points can be detected without bias. The sweep spacing is 0.1°; interpolation permits a continuous estimate but does not establish 0.1° (or finer) experimental accuracy.
-The stored corner positions are center-relative by construction. The center adds no angle feature after recentering, but its noisy measurement is subtracted from all four corners and therefore increases their covariance; the inverse accounts for this with W = I − 11ᵀ/5. Any rotation information in absolute center displacement is absent and was not included.
+| Statistic | Result |
+|---|---:|
+| Median absolute angle error | 0.275162 degrees |
+| Pooled 95th-percentile absolute angle error | 1.85545 degrees |
+| RMSE | 0.90666 degrees |
+| Maximum absolute error | 14.3954 degrees |
+| Trials above 1 degree | 13.66% |
+| Trials above 5 degrees | 0.4059% |
+| Endpoint clamp rate (-20 / +20 degrees) | 0.09901% / 1.059% |
+| Worst per-angle P95 | 5.23959 degrees at +7.6 degrees |
+| Local Fisher 1-sigma range | 0.150457 to 2.01486 degrees |
+| Best / worst local Fisher angle | -20 / +10.1 degrees |
 
-## Reusable inverse
+The pooled and per-angle Monte Carlo percentiles have finite-sample uncertainty. The local Fisher estimate describes small errors near the true angle and does not capture wrong-branch outcomes. The 0.1-degree ground-truth spacing is sweep sampling, not demonstrated measurement accuracy.
+This simulation assumes known point identities and an exact calibration apart from the fitted quadratic approximation. It omits detector calibration, alignment, localization bias, and other systematic errors; it is not measured hardware precision.
 
-`Script/analyze_eye_rotation.py` exposes `estimate_rotation(measured_absolute_xy_mm, angles_deg, corner_templates_mm)`. Pass a (5, 2) array in center, top-left, top-right, bottom-left, bottom-right order. It returns the fitted rotation in degrees and center-corrected weighted RMS residual in mm.
+## Reusable estimator
+
+`Script/analyze_eye_rotation.py` exposes `estimate_rotation_polynomial(measured_absolute_xy_mm, coefficients_scaled_by_point_xy, baseline_corner_coordinates_mm, bounds_deg=(-20, 20))`. Supply a `(5, 2)` array ordered center, TL, TR, BL, BR. It returns the fitted angle in degrees and weighted RMS residual in mm.
