@@ -1,4 +1,4 @@
 .codex/
 .vscode/
 data/
-__pycahce_/
+__pycache__/

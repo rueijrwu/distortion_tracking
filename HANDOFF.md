@@ -1,170 +1,129 @@
-# Distortion tracking handoff
+﻿# Distortion tracking handoff
 
-## Goal
+## Project goal
 
-Use Python with the CODE V COM API to calculate distortion grids for `Lens/p1_ME.seq` at multiple eye rotations. Apply each eye rotation using `ADE` on the surface labeled `RC`. CODE V performs ray tracing; Python writes the numeric data and creates all visualization.
+Estimate one-axis eye rotation from five detected image points: the center and the top-left, top-right, bottom-left, and bottom-right grid points. The CODE V sweep provides ground-truth rotation labels and the ideal image coordinates for calibration. The main question is how accurately rotation can be estimated when the five point coordinates are noisy.
 
-Continue on another Windows machine with CODE V and access to its license server. Copy this project with its `Lens` and `Script` directories intact. Paths in the distortion script are resolved relative to the script location, so the project can move without editing its root path.
+The current five-point estimator uses the four corner coordinates relative to the measured center. It matches that eight-value X/Y pattern to the saved angle sweep with a weighted piecewise-linear least-squares fit. It does not yet use a polynomial. `Theory.md` describes a proposed quadratic forward model for discussion; agree on the modeled quantity and fitting approach before changing the estimator.
 
-## Files
+## Project files
 
-- `Script/distortion_grid.py`: CODE V collector; opens one COM session and saves only the structured numeric pickle.
-- `Script/plot_distortion_grid.py`: standalone plotter; reads the pickle and creates a five-panel PNG without starting CODE V.
-- `Script/analyze_distortion.py`: standalone analysis; compares each rotation with the same relative field points at RC 0 and saves pointwise differences plus a summary chart without starting CODE V.
-- `Script/raytracing.py`: original user template for COM initialization, `cv_eval`, CODE V commands, and eye rotation.
-- `Lens/p1_ME.seq`: target optical model.
-- `Script/codev_startup_check.py`: optional standalone check that prints COM creation timing, the return value of `StartCodeV()`, and the CODE V version. It stops its CODE V session when finished.
+- `Lens/p1_ME.seq`: target CODE V lens model.
+- `Script/distortion_grid.py`: collects the rotation sweep in one CODE V COM session and saves a structured NumPy array with Python pickle.
+- `Script/plot_distortion_grid.py`: plots selected rotations from the pickle using Matplotlib; it does not start CODE V.
+- `Script/analyze_distortion.py`: compares radial and tangential distortion percentages with their values at RC 0 degrees.
+- `Script/analyze_eye_rotation.py`: studies five-point rotation observability and 1 µm coordinate-noise performance; it reads the sweep and does not start CODE V.
+- `Script/codev_startup_check.py`: optional CODE V COM startup check.
+- `Script/raytracing.py`: original COM/ray-tracing reference, including the required `S_RC = "s\"RC\""` surface selector.
+- `Theory.md`: proposed quadratic forward-model notation and open modeling considerations. No polynomial estimator has been implemented.
+- `AGENTS.md`: project-specific environment and CODE V workflow instructions.
 
-## Environment
+## Python environment
 
-No specific Python version is required. On the machine used for validation, the named `venv` is managed by `pyenv-win-venv` and lives under `%USERPROFILE%\.pyenv-win-venv\envs\venv`; it currently uses Python 3.13.11 and has `pywin32` installed.
-
-In PowerShell, use the environment's interpreter by its absolute path:
+Use this interpreter by its absolute path for every Python script, module, install, or check command:
 
 ```powershell
-$distortionPython = "$env:USERPROFILE\.pyenv-win-venv\envs\venv\Scripts\python.exe"
+$distortionPython = 'C:\Users\rueijrwu\.pyenv-win-venv\envs\venv\Scripts\python.exe'
 & $distortionPython --version
-& $distortionPython -m pip show pywin32
 ```
 
-Install `pywin32` in that environment only if it is missing:
+No particular Python version is required. Python 3.13.11 was present when the latest results were generated. Required packages are NumPy and Matplotlib; collecting from CODE V also requires `pywin32`. Install a missing package into this environment with, for example:
 
 ```powershell
-& $distortionPython -m pip install pywin32
+& $distortionPython -m pip install numpy matplotlib pywin32
 ```
 
-If activation is useful, invoke its `Activate.ps1` directly in the same PowerShell process. The `pyenv-win-venv activate venv` wrapper starts a child shell in this setup, so its prompt can appear active while the parent process still resolves another Python.
+If activation is useful, run `& 'C:\Users\rueijrwu\.pyenv-win-venv\envs\venv\Scripts\Activate.ps1'` directly in the same PowerShell command. The `pyenv-win-venv activate venv` wrapper starts a child `cmd`, so it does not change the parent PowerShell's Python.
 
-The collector uses NumPy for its structured numeric array and Python's standard `pickle` module to save it. The standalone plotter uses NumPy and Matplotlib with the noninteractive Agg backend to write PNG. The original `raytracing.py` has additional dependencies and an IPython plotting setup.
+## CODE V model and collector
 
-COM initialization follows the original template:
+The target is `Lens\p1_ME.seq`. Keep the sequence's existing `SRC_ROT ADE -20` setting unless the user requests otherwise. Apply eye rotation as `ADE` on surface `RC`, using the exact selector from `raytracing.py`:
 
 ```python
-pythoncom.CoUninitialize()
-pythoncom.CoInitialize()
-cv = win32com.client.Dispatch("CodeV.Application")
-cv.StartingDirectory = str(LENS_DIR)
-cv.StartCodeV()
+S_RC = "s\"RC\""
 ```
 
-The distortion script also sets `CommandTimeout = 600000` and `MaxTextBufferSize = 1000000` before `StartCodeV()`. It calls `StopCodeV()` and `CoUninitialize()` during cleanup. Allow initialization to complete before issuing optical commands.
+The collector sets the requested `ADE`, runs `set vig`, reads `(ade s"RC")` back for every angle, and stops if CODE V reports an error or the readback does not match. Do not shorten the command to `ade "RC"`; that earlier form failed to select the intended surface and produced misleading, angle-invariant results. The collector starts CODE V once, loads the lens sequence, traces the grid for each requested angle, and cleans up with `StopCodeV()` and `pythoncom.CoUninitialize()`.
 
-## Model and calculation
+The completed sweep uses 401 rotations from -20° to +20° in 0.1° increments and an 11 × 11 field grid at each rotation. Its pickle has 48,521 records (121 per angle), stored as a one-dimensional structured NumPy array with these nine `float64` fields:
 
-The target model has one wavelength, 850 nm (`REF 1`), millimeter units (`DIM M`), and angular fields extending to ±10 degrees in X and Y. The sequence contains a separate surface `SRC_ROT` with an existing `ADE -20` setting. The current implementation changes only `RC` for the eye rotation sweep; retain the source rotation unless the user requests a change.
+`eye_rotation_deg`, `field_x_relative`, `field_y_relative`, `paraxial_x_mm`, `paraxial_y_mm`, `real_x_mm`, `real_y_mm`, `radial_distortion_pct`, `tangential_distortion_pct`.
 
-The model is loaded using the user's command pattern:
+The `real_x_mm` and `real_y_mm` image coordinates are already relative to the center ray at the same rotation. Radial and tangential distortion are percentages; their changes are reported in percentage points. Those percentages are distinct from the image-coordinate shifts used by the current five-point rotation estimator.
 
-```python
-cv.Command(f'run "{SEQ_FILE}";go')
-```
+## Existing data and results
 
-`calculate_grid_at_rotation()` follows the installed `dist.seq` calculation:
+The current full sweep is `data\distortion_grid\distortion_grid.pkl`. It was collected with the explicit RC surface selector and per-angle readback checks. All 401 angles completed, with 121 finite rows per angle, no failed edge rays, finite coordinates/distortion values, and zero center distortion. The successful collection and 1 × 5 plot were recorded on 8 October 2026 using CODE V 2024.03 SR1 Build 42748259.
 
-1. Set `ade s"RC" <angle>;set vig`, then read back `(ade s"RC")` and stop if CODE V did not apply the requested angle. This explicit surface-label selector matches `Script/raytracing.py`'s `S_RC` definition and command.
-2. Set two angular fields using the original maximum X/Y semi-fields, then obtain their equivalent `XOB` and `YOB` values and switch to object-height fields.
-3. Trace the center chief ray and a chief ray at relative field `(0.05, 0.05)`.
-4. Construct the reference grid from the image scale at that central 5% field. Grid increments are `40 * (near_axis - center) / (grid_lines - 1)` for each axis.
-5. Trace the grid using `cv.RAYRSI(1, 1, 0, 0, [0.0, 0.0, relative_x, relative_y])`. A return value of zero indicates success. Read image coordinates using `EvaluateExpression("(x si)")` and `EvaluateExpression("(y si)")`.
-6. Subtract the center image coordinates and calculate radial/tangential distortion percentages using the convention in `dist.seq`.
-
-Relative grid fields describe equivalent object height after the field conversion. The pickle array's `paraxial_*` fields retain the terminology used by `dist.seq`; their reference scale comes from the central 5% real ray rather than a separate paraxial ray trace.
-
-For reference image position `(px, py)`, residual `(dx, dy)`, and `r² = px² + py²`:
-
-```text
-radial_percent     = 100 * (dx*px + dy*py) / r²
-tangential_percent = 100 * (dx*py - dy*px) / r²
-```
-
-Both values are zero at the center. The tangential sign was corrected to match the installed macro. Failed interior grid rays are represented by NaN, and plotted lines break at missing points. A failed center, reference ray, or edge grid ray raises an error.
-
-This implementation targets the finite image plane in `p1_ME.seq`. It does not implement the macro's afocal direction-coordinate branch or multiple zoom positions.
-
-## Run commands
-
-From the project root, set the named environment's interpreter:
-
-```powershell
-$distortionPython = "$env:USERPROFILE\.pyenv-win-venv\envs\venv\Scripts\python.exe"
-```
-
-For a small CODE V smoke run, write the pickle and plot to the system temporary directory:
-
-```powershell
-& $distortionPython -u Script\distortion_grid.py --rotation-min 0 --rotation-count 1 --grid-lines 3 --output-dir "$env:TEMP\distortion_grid_check"
-& $distortionPython -u Script\plot_distortion_grid.py --input "$env:TEMP\distortion_grid_check\distortion_grid.pkl" --output "$env:TEMP\distortion_grid_check\distortion_grid.png" --rotations 0
-```
-
-The default collection runs one CODE V session for 401 eye rotations from -20 to +20 degrees in 0.1-degree steps, with an 11 ? 11 grid at each rotation. It writes `data/distortion_grid/distortion_grid.pkl`:
-
-```powershell
-& $distortionPython -u Script\distortion_grid.py
-```
-
-Plot the requested five rotations from the saved pickle without starting CODE V:
+The selected grid plot is `data\distortion_grid\distortion_grid.png`; it shows RC -10°, -5°, 0°, +5°, and +10° with shared image-coordinate axes. Generate it from the existing pickle without running CODE V:
 
 ```powershell
 & $distortionPython -u Script\plot_distortion_grid.py
 ```
 
-Analyze radial and tangential distortion changes against RC 0 degrees, matched by relative X/Y field point. The reported differences are percentage points (the distortion percentages are subtracted), and the summary includes the maximum absolute and RMS change at every stored angle:
+The baseline distortion comparison is saved in `data\distortion_grid\distortion_change_from_zero.pkl` and `data\distortion_grid\distortion_change_from_zero.png`. Recreate it from the pickle with:
 
 ```powershell
 & $distortionPython -u Script\analyze_distortion.py
 ```
 
-This writes `data/distortion_grid/distortion_change_from_zero.pkl` (pointwise changes and per-angle summary) and `data/distortion_grid/distortion_change_from_zero.png` (maximum absolute and RMS changes versus rotation). Use `--input` and `--output-dir` to select alternate paths.
-
-The plotter defaults to RC -10, -5, 0, 5, and 10 degrees. To select other stored angles or paths, use `--rotations`, `--input`, and `--output`.
-
-Investigate whether five detected points (center and four grid corners) can estimate eye rotation from the saved sweep. This analysis reads the pickle only and does not start CODE V:
+The five-point study outputs are in `data\eye_rotation_analysis\`: `report.md`, `eye_rotation_observability.pkl`, `dependencies_vs_rotation.png`, and `precision_estimates.png`. Recreate them with:
 
 ```powershell
 & $distortionPython -u Script\analyze_eye_rotation.py
 ```
 
-It writes a separate `data/eye_rotation_analysis` folder containing `report.md`, `eye_rotation_observability.pkl`, and PNG plots of corner-coordinate/distortion changes and conditional precision. The coordinate inverse uses the four corners relative to the measured center; the collected data already recenter coordinates at the center for each rotation. Its seeded Monte Carlo result assumes independent Gaussian noise with 1 µm standard deviation per X and Y coordinate on each of the five measured points. This is an idealized simulation using known field identities and exact CODE V templates, not hardware precision. The reusable `estimate_rotation()` function is documented in the analysis script.
+The current inverse model takes five absolute measured points in millimeters, ordered center, top-left, top-right, bottom-left, bottom-right. It subtracts the measured center and compares the four corner coordinates against the sweep templates. Between adjacent 0.1° templates it projects the measurement onto the line segment using weighted least squares, then chooses the segment with the lowest residual. The weight accounts for the shared noise introduced when the measured center is subtracted: `W = I - 11ᵀ/5` for the four corners, up to the common noise scale.
 
-## Outputs
+The 1 µm study assumes independent Gaussian noise with standard deviation 0.001 mm on each X and Y coordinate of all five points. It samples 101 true angles with 100 trials per angle (10,100 trials total), assumes known point identities and exact CODE V templates, and omits detector calibration, alignment, and other systematic errors. Results are conditional simulation results, not measured hardware precision:
 
-- Collector: `data/distortion_grid/distortion_grid.pkl`, a one-dimensional structured NumPy array with nine `float64` fields in the original CSV column order: `eye_rotation_deg`, `field_x_relative`, `field_y_relative`, `paraxial_x_mm`, `paraxial_y_mm`, `real_x_mm`, `real_y_mm`, `radial_distortion_pct`, and `tangential_distortion_pct`.
-- Plotter: `data/distortion_grid/distortion_grid.png`, one 1 × 5 PNG figure with a labeled grid panel for each default selected rotation. Panels share image-coordinate limits and equal aspect for direct visual comparison; reference grids are dashed gray, real grids are blue, and distortion vectors are red.
+| Measure | Result |
+|---|---:|
+| Median absolute rotation error | 0.258893° |
+| Pooled 95th-percentile absolute error | 1.89326° |
+| RMSE | 0.924109° |
+| Trials with error greater than 1° | 13.4% |
+| Trials with error greater than 5° | 0.485% |
+| Largest observed error | 14.5486° (truth +17.2°, estimate +2.65139°) |
+| Worst per-angle 95th percentile | 5.53341° at truth +7.6° |
 
-Rerunning the plotter only reads the pickle; it does not start or connect to CODE V.
+Performance varies greatly with true angle. The 0.1° grid spacing and interpolation support a continuous numerical estimate, but do not establish 0.1° measurement accuracy. The center anchors the absolute measurement; after center subtraction, it does not add an independent angle feature in this dataset, and its measurement noise is shared across all four relative corners.
 
-## References already reviewed
+The study's leave-one-out interpolation error (median 0.000430581°, maximum 0.00117622°) measures noiseless template interpolation/discretization only. It is not a precision estimate.
 
-These paths refer to the original CODE V 2024.03 SR1 installation. Use the corresponding installation directory on the destination machine.
+## Polynomial model discussion
 
-- `C:\CODEV202403_SR1\com\Example_CVApplication.py`: COM methods, properties, events, and direct `RAYRSI` example.
-- `C:\CODEV202403_SR1\com\CODEV_PSF_1FLD_Example.py`: simple `Dispatch` / `StartCodeV` connection and Python visualization example.
-- `C:\CODEV202403_SR1\macro\dist.seq`: authoritative source for the grid field setup, central reference scale, ray coordinates, and listed distortion values.
-- Help: `index.html#page/api/1Overview.2.2.html`.
-- Help: `index.html#page/macroplus/Macro-PLUS.html#ww16575`.
-- Help: `index.html#page/macroplus/SPHIST.html#ww493` (the supplied anchor leads to the DIST example).
-- Help: `index.html#page/diagnostic/HIDD_DISTORTION_GRID.html`.
-- Help: `index.html#page/macroplus/HIDC_DISTGRID_ListDistortionValues.html#ww46196`.
-- Help: `index.html#page/connect/splash.html`.
+`Theory.md` defines a candidate quadratic forward model for each point's image-coordinate shift from RC 0°:
 
-The installed `dist.seq` creates CODE V plot output even when numeric listing is enabled. The Python implementation traces directly through COM instead of running that plotting macro. For a one-time numeric comparison, use the macro's list option `YES`, for example:
+`Δ_i(θ) = [θ², θ, 1] C_i`, where `Δ_i = [dx_i, dy_i]`.
 
-```text
-in cv_macro:dist 0 0 "" 2 "RED" 11 1 "YES"
+The ground-truth sweep can fit the coefficient matrix by least squares. Because the shift is defined relative to 0°, it should satisfy `Δ_i(0) = 0`; a quadratic model can enforce this by omitting the constant term. The basis `[θ³, θ², θ, 1]` is cubic, not quadratic. No polynomial coefficients or polynomial inverse are currently used by the analysis scripts.
+
+Before implementing a polynomial estimator, settle whether the modeled feature is center-relative real image coordinate shift in millimeters or a radial/tangential distortion change in percentage points. The current five-point estimator uses the former. Then compare polynomial forward-fit residuals and held-out angle estimates against the current template method using the same noise assumptions. A good forward fit alone does not establish inverse precision or eliminate ambiguity where different angles produce similar patterns.
+
+## Validation and historical artifacts
+
+The corrected full sweep's per-angle ADE readbacks and finite records are the relevant collection validation. Earlier collector runs and the earlier purported `dist.seq` match are invalid as eye-rotation validation because the command omitted the explicit RC surface selector; do not use those results.
+
+`data\distortion_grid\distortion_grid.svg` and `data\distortion_grid\validation_report.md` are historical outputs from the earlier workflow. They predate the corrected collector and are not evidence for the 401-angle rotation sweep. The scripts do not delete old outputs automatically. A matching macro comparison has not been completed for the corrected collector.
+
+## Resume checklist
+
+1. Read `AGENTS.md` and `Theory.md`, then review `data\eye_rotation_analysis\report.md`.
+2. Use the existing corrected `distortion_grid.pkl` for further analysis; it is already the ground-truth sweep.
+3. Discuss and agree on the polynomial's modeled quantity and baseline constraint before changing the estimator.
+4. Keep the current scope to one-axis RC rotation and the five identified grid points unless the user expands it.
+
+Only rerun CODE V collection if the sweep needs regeneration or settings change. To collect the default 401-angle sweep:
+
+```powershell
+& $distortionPython -u Script\distortion_grid.py
 ```
 
-## Validation results
+For a small smoke run that writes to the system temporary folder:
 
-Validation completed on 8 October 2026 with CODE V 2024.03 SR1 Build (42748259), Python 3.13.11 from the named `venv`, `pywin32`, and NumPy 2.4.3. No fixed Python version is required.
+```powershell
+& $distortionPython -u Script\distortion_grid.py --rotation-min 0 --rotation-count 1 --grid-lines 3 --output-dir "$env:TEMP\distortion_grid_check"
+```
 
-Earlier collector runs and the earlier macro comparison are invalid as eye-rotation validation: the collector issued `ade "RC"`, which omitted the surface selector used by `raytracing.py` (`S_RC = "s\"RC\""`). That command did not apply the requested RC rotation, so the prior apparent macro match and identical-angle outputs must not be relied on. The collector now uses the same `ade {S_RC}` command as `raytracing.py`, verifies each requested value by evaluating `(ade s"RC")`, and stops if CODE V reports an error or the readback differs.
-
-A corrected smoke run at RC -10, 0, and +10 degrees confirmed the three readbacks and produced distinct grids. At 3 × 3 resolution, the maximum absolute differences against RC=0 were 0.32846 and 0.35895 percentage points in radial distortion and 0.13095 and 0.14219 percentage points in tangential distortion for RC=-10 and +10, respectively.
-
-The corrected full collection completed in one CODE V session on 8 October 2026. All 401 requested angles from -20 through +20 degrees at 0.1-degree steps passed ADE readback checks. The pickle contains 48,521 rows, exactly 121 per angle; all stored grid coordinates and distortion values are finite, and all 401 center rows have zero radial and tangential distortion. No edge rays failed. The standalone plotter successfully generated the requested -10, -5, 0, +5, and +10 degree panels in one 1 × 5 PNG with shared axes. Their maximum absolute radial distortion values are 2.3001%, 2.4101%, 2.5359%, 2.6743%, and 2.8218%, respectively; maximum absolute tangential values are 2.1173%, 2.1760%, 2.2410%, 2.3097%, and 2.3802%.
-
-The sequence retains its original `SRC_ROT ADE -20` setting; eye rotations are applied only to `RC`. The current output folder also contains an older `distortion_grid.svg` and `validation_report.md` from before the surface-selector correction. Those two historical artifacts are not valid rotation evidence; the scripts do not remove prior outputs automatically.
-
-## Continue on another machine
-
-Copy the project with `Lens` and `Script` intact, confirm CODE V and its license are available, and install `pywin32`, NumPy, and Matplotlib in the Python environment if any are missing. Use the environment's interpreter directly as shown above. Run the small grid first, compare with the installed `dist.seq` listing when validating, then collect the 401-angle sweep and run the standalone plotter. The small-grid commands write to the system temporary directory. Paths in both scripts resolve relative to the project, so its root can move without editing them.
+The collector needs Windows, CODE V, a working license, and `pywin32`. Its default output is `data\distortion_grid\distortion_grid.pkl`; all script paths otherwise resolve relative to the project.
