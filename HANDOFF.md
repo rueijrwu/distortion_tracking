@@ -28,13 +28,13 @@ Required packages are NumPy and Matplotlib; collecting from CODE V also requires
 
 ## P1 grid and rotation transform
 
-The canonical P1 sweep is `data\distortion_grid\distortion_grid.pkl`; its CSV export is retained at `data\distortion_grid\distortion_grid.csv`. The sweep has 401 RC rotations from -20° to +20° in 0.1° increments and nine fields per angle. `data\distortion_grid\distortion_grid.png` plots selected rotations. Recreate it with:
+The canonical P1 sweep is `data\distortion_grid\distortion_grid.pkl`; its CSV export is retained at `data\distortion_grid\distortion_grid.csv`. The sweep has 51 absolute THI values from +5 to -5 mm, 401 RC rotations from -20° to +20° in 0.1° increments at each THI, and nine fields per state (184,059 rows total). The structured data includes `z_mm`. Plotting defaults to five rotation panels at -10°, -5°, 0°, +5°, and +10°, overlaying the exact stored z planes -5, -2.6, 0, +2.6, and +5 mm in each panel. Colors distinguish z planes; dashed and solid lines distinguish paraxial reference and real image grids. Use `--rotations` and `--z-values` to select other exact stored values. No CODE V trace is performed by the plotter. Recreate the default comparison with:
 
 ```powershell
 & $distortionPython -u Script\plot_distortion_grid.py
 ```
 
-The P1 rotation fit uses the actual real-coordinate grid at theta=0 as its fixed source, so its sampled baseline barrel distortion carries into each prediction. Recreate its report, pickle, coefficient artifact, and plots with:
+The P1 rotation fit uses the actual real-coordinate grid at theta=0 as its fixed source, so its sampled baseline barrel distortion carries into each prediction. The existing P1 fit outputs were generated from the previous single-z dataset, whose lens-sequence revision had `Cornea_ENT_D` THI at -35 mm; the current user-edited sequence has a 1 mm baseline. The old fit outputs are stale relative to the current multi-z sweep; rerun only when new fit results are requested. The runner defaults to z=0 and accepts `--z-mm` to fit another slice. To recreate its report, pickle, coefficient artifact, and plots:
 
 ```powershell
 & $distortionPython -u Script\analyze_p1_rotation_transform.py
@@ -44,7 +44,7 @@ The outputs are in `data\p1_rotation_transform\`. The fitted mapping is `X=sx*x0
 
 ## P1 CODE V collection
 
-The target is `Lens\p1_ME.seq`. Keep the existing `SRC_ROT ADE -20` setting unless requested otherwise. Apply eye rotation through `ADE` on surface `RC` with the exact selector `S_RC = "s\"RC\""` from `raytracing.py`. The collector verifies each ADE readback and cleans up with `StopCodeV()` and `pythoncom.CoUninitialize()`.
+The target is `Lens\p1_ME.seq`. Keep the existing `SRC_ROT ADE -20` setting unless requested otherwise. Apply eye rotation through `ADE` on surface `RC` with the exact selector `S_RC = "s\"RC\""` from `raytracing.py`. The collector applies absolute THI values through `S_CORNEA_MOV = "s\"Cornea_ENT_D\""`, verifies both ADE and THI readbacks, and cleans up with `StopCodeV()` and `pythoncom.CoUninitialize()`. It checkpoints only complete z groups, validates resume against the sweep configuration and lens SHA-256, and replaces the canonical pickle only after the full sweep completes.
 
 To recollect the default P1 sweep:
 

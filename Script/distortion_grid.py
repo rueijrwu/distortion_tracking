@@ -8,7 +8,9 @@ saved data later with plot_distortion_grid.py without starting CODE V.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import math
+import os
 import pickle
 from pathlib import Path
 from typing import Sequence
@@ -27,10 +29,15 @@ OUTPUT_DIR = PROJECT_DIR / "data" / "distortion_grid"
 EYE_ROTATION_MIN_DEG = -20.0
 EYE_ROTATION_MAX_DEG = 20.0
 EYE_ROTATION_COUNT = 401
+
+Z_MAX_MM = -5
+Z_MIN_MM = 5
+Z_COUNT = 51
+
 GRID_LINES = 3
 ZOOM_POSITION = 1
 S_RC = "s\"RC\""
-
+S_Z_MOV = "s\"Cornea_ENT_D\""
 
 def cv_eval(cv, command: str, *args: str) -> float:
     """Evaluate a CODE V expression using raytracing.py's helper pattern."""
@@ -63,11 +70,15 @@ def angular_fov(cv) -> tuple[float, float]:
 
 
 def calculate_grid_at_rotation(
-    cv, rotation_deg: float, grid_lines: int, fov_x: float, fov_y: float
+    cv, rotation_deg: float, grid_lines: int, fov_x: float, fov_y: float,
+    z_mm: float | None = None,
 ) -> list[dict[str, float]]:
     """Mirror DIST's field setup, central reference, and RAYRSI grid tracing."""
     # Match raytracing.py's explicit surface-label selector for RC.
-    command = f"ade {S_RC} {rotation_deg:.8f};set vig"
+    commands = [f"ade {S_RC} {rotation_deg:.8f}"]
+    if z_mm is not None:
+        commands.append(f"thi {S_Z_MOV} {float(z_mm):.8f}")
+    command = ";".join(commands + ["set vig"])
     response = cv.Command(command)
     actual_rotation = cv_eval(cv, "ade", S_RC)
     if "Command End:" not in response or any(
@@ -81,6 +92,14 @@ def calculate_grid_at_rotation(
             f"CODE V did not apply requested RC rotation {rotation_deg:g}° "
             f"(read back {actual_rotation:g}°; command response: {response!r})"
         )
+    if z_mm is not None:
+        actual_z = cv_eval(cv, "thi", S_Z_MOV)
+        if not math.isclose(actual_z, float(z_mm), rel_tol=0.0, abs_tol=1e-8):
+            raise RuntimeError(
+                f"CODE V did not apply requested cornea movement {z_mm:g} mm "
+                f"(read back {actual_z:g} mm; command response: {response!r})"
+            )
+        print(f"  Cornea movement readback verified: {actual_z:g} mm", flush=True)
     print(f"  RC readback verified: {actual_rotation:g}°", flush=True)
     # Restore the original angular field specification before each rotation;
     # the DIST reference calculation below changes the active specification to XOB/YOB.
@@ -144,6 +163,7 @@ def calculate_grid_at_rotation(
                     "radial_distortion_pct": radial,
                     "tangential_distortion_pct": tangential,
                     "eye_rotation_deg": float(rotation_deg),
+                    "z_mm": float(z_mm) if z_mm is not None else math.nan,
                 }
             )
     return rows
@@ -152,6 +172,7 @@ def calculate_grid_at_rotation(
 def write_pickle(rows: list[dict[str, float]], path: Path) -> None:
     columns = [
         "eye_rotation_deg",
+        "z_mm",
         "field_x_relative",
         "field_y_relative",
         "paraxial_x_mm",
@@ -170,19 +191,59 @@ def write_pickle(rows: list[dict[str, float]], path: Path) -> None:
         pickle.dump(data, stream, protocol=pickle.HIGHEST_PROTOCOL)
 
 
-def calculate_distortion_grid(rotations: Sequence[float], grid_lines: int, output_dir: Path) -> None:
+def atomic_pickle(value, path: Path) -> None:
+    tmp_path = path.with_name(path.name + ".tmp")
+    with tmp_path.open("wb") as stream:
+        pickle.dump(value, stream, protocol=pickle.HIGHEST_PROTOCOL)
+        stream.flush()
+        os.fsync(stream.fileno())
+    os.replace(tmp_path, path)
+
+
+def save_rows_checkpoint(rows: list[dict[str, float]], path: Path, config: dict) -> None:
+    atomic_pickle({"config": config, "rows": rows}, path)
+
+
+def calculate_distortion_grid(
+    rotations: Sequence[float], grid_lines: int, output_dir: Path,
+    z_values: Sequence[float | None] | None = None, resume: bool = False,
+) -> None:
     if not SEQ_FILE.is_file():
         raise FileNotFoundError(f"Target sequence not found: {SEQ_FILE}")
     if grid_lines < 3 or grid_lines > 21:
         raise ValueError("Grid line count must be between 3 and 21.")
 
     output_dir.mkdir(parents=True, exist_ok=True)
+    if z_values is None:
+        z_values = [None]
+    config = {
+        "rotations": [float(value) for value in rotations],
+        "z_values_mm": [None if value is None else float(value) for value in z_values],
+        "grid_lines": int(grid_lines),
+        "lens_sha256": hashlib.sha256(SEQ_FILE.read_bytes()).hexdigest(),
+    }
+    checkpoint_path = output_dir / "distortion_grid.checkpoint.pkl"
+    if resume:
+        if not checkpoint_path.is_file():
+            raise FileNotFoundError(f"No P1 checkpoint to resume: {checkpoint_path}")
+        with checkpoint_path.open("rb") as stream:
+            checkpoint = pickle.load(stream)
+        if checkpoint.get("config") != config:
+            raise ValueError("P1 checkpoint settings do not match the requested sweep.")
+        all_rows = list(checkpoint["rows"])
+    else:
+        all_rows = []
+        if checkpoint_path.exists():
+            checkpoint_path.unlink()
+    completed = {
+        (None if math.isnan(row.get("z_mm", math.nan)) else row["z_mm"], row["eye_rotation_deg"])
+        for row in all_rows
+    }
     # Match raytracing.py's COM apartment reset before creating CODE V.
     pythoncom.CoUninitialize()
     pythoncom.CoInitialize()
     cv = None
     codev_started = False
-    all_rows: list[dict[str, float]] = []
     try:
         print("Connecting to CODE V COM...", flush=True)
         cv = win32com.client.Dispatch("CodeV.Application")
@@ -197,14 +258,32 @@ def calculate_distortion_grid(rotations: Sequence[float], grid_lines: int, outpu
         fov_x, fov_y = angular_fov(cv)
         print(f"Angular semi-field: X={fov_x:g}°, Y={fov_y:g}°", flush=True)
 
-        for index, angle in enumerate(rotations, start=1):
-            print(f"RC rotation {angle:g}° ({index}/{len(rotations)})", flush=True)
-            grid_rows = calculate_grid_at_rotation(
-                cv, float(angle), grid_lines, fov_x, fov_y
-            )
-            all_rows.extend(grid_rows)
+        for z_index, z_value in enumerate(z_values, start=1):
+            z_mm = None if z_value is None else float(z_value)
+            key_z = None if z_value is None else float(z_value)
+            if all((key_z, float(angle)) in completed for angle in rotations):
+                continue
+            z_rows: list[dict[str, float]] = []
+            for index, angle in enumerate(rotations, start=1):
+                print(
+                    f"z {z_value if z_value is not None else 'baseline'} mm "
+                    f"({z_index}/{len(z_values)}), "
+                    f"RC rotation {angle:g}° ({index}/{len(rotations)})", flush=True
+                )
+                grid_rows = calculate_grid_at_rotation(
+                    cv, float(angle), grid_lines, fov_x, fov_y, z_mm=z_mm
+                )
+                z_rows.extend(grid_rows)
+            all_rows.extend(z_rows)
+            completed.update((key_z, float(angle)) for angle in rotations)
+            save_rows_checkpoint(all_rows, checkpoint_path, config)
 
-        write_pickle(all_rows, output_dir / "distortion_grid.pkl")
+        canonical = output_dir / "distortion_grid.pkl"
+        tmp_path = canonical.with_name(canonical.name + ".tmp")
+        write_pickle(all_rows, tmp_path)
+        os.replace(tmp_path, canonical)
+        if checkpoint_path.exists():
+            checkpoint_path.unlink()
     finally:
         try:
             if cv is not None and codev_started:
@@ -218,18 +297,25 @@ def main() -> None:
     parser.add_argument("--rotation-min", type=float, default=EYE_ROTATION_MIN_DEG)
     parser.add_argument("--rotation-max", type=float, default=EYE_ROTATION_MAX_DEG)
     parser.add_argument("--rotation-count", type=int, default=EYE_ROTATION_COUNT)
+    parser.add_argument("--z-min", type=float, default=Z_MIN_MM)
+    parser.add_argument("--z-max", type=float, default=Z_MAX_MM)
+    parser.add_argument("--z-count", type=int, default=Z_COUNT)
     parser.add_argument("--grid-lines", type=int, default=GRID_LINES)
     parser.add_argument("--output-dir", type=Path, default=OUTPUT_DIR)
+    parser.add_argument("--resume", action="store_true")
     args = parser.parse_args()
     if args.rotation_count < 1:
         parser.error("--rotation-count must be at least 1")
+    if args.z_count < 1:
+        parser.error("--z-count must be at least 1")
 
     if args.rotation_count == 1:
         rotations = [args.rotation_min]
     else:
         step = (args.rotation_max - args.rotation_min) / (args.rotation_count - 1)
         rotations = [args.rotation_min + i * step for i in range(args.rotation_count)]
-    calculate_distortion_grid(rotations, args.grid_lines, args.output_dir)
+    z_values = np.linspace(args.z_min, args.z_max, args.z_count).tolist()
+    calculate_distortion_grid(rotations, args.grid_lines, args.output_dir, z_values, args.resume)
     print(f"Saved distortion pickle under: {(args.output_dir / 'distortion_grid.pkl').resolve()}")
 
 

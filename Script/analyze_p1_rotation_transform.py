@@ -58,6 +58,10 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--input", type=Path, default=INPUT_PATH)
     parser.add_argument("--output-dir", type=Path, default=OUTPUT_DIR)
+    parser.add_argument(
+        "--z-mm", type=float, default=None,
+        help="z slice in mm (default: slice closest to 0; old pickles use their single baseline slice)",
+    )
     args = parser.parse_args()
     with args.input.open("rb") as stream:
         records = pickle.load(stream)
@@ -65,6 +69,19 @@ def main() -> None:
                 "paraxial_x_mm", "paraxial_y_mm", "real_x_mm", "real_y_mm"}
     if not isinstance(records, np.ndarray) or records.dtype.names is None or not required.issubset(records.dtype.names):
         raise ValueError("Input is not the expected structured P1 grid array")
+    if "z_mm" in records.dtype.names:
+        available_z = np.unique(records["z_mm"])
+        selected_z = float(available_z[np.argmin(np.abs(available_z))]) if args.z_mm is None else args.z_mm
+        z_mask = np.isclose(records["z_mm"], selected_z, rtol=0.0, atol=1e-8)
+        if not np.any(z_mask):
+            available_text = ", ".join(f"{value:g}" for value in available_z)
+            raise ValueError(
+                f"Requested z={selected_z:g} mm is absent from {args.input}. "
+                f"Available z values: {available_text or '(none)'}."
+            )
+        records = records[z_mask]
+    elif args.z_mm is not None:
+        raise ValueError(f"Requested z={args.z_mm:g} mm, but this pickle has no z_mm field.")
     theta = np.unique(records["eye_rotation_deg"])
     theta.sort()
     if theta.size != 401 or not np.allclose(theta, np.linspace(-20, 20, 401), rtol=0, atol=1e-9):

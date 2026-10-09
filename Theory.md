@@ -8,7 +8,7 @@ Describe the center-relative image pattern as a function of one-axis eye rotatio
 
 The working model treats P1 as accommodation-independent and P4 as accommodation-dependent. P1 may still require rotation-dependent deformation. The available P1 dataset has no accommodation dimension, so accommodation independence is a modeling premise, not a result of a P1 accommodation sweep.
 
-The current calibration domain is one-axis RC rotation from -20 to +20 degrees. P4 additionally covers accommodation from 0 to 5 D. Each state has nine identified fields in a 3 x 3 grid. The P1 and P4 coefficients are specific to their respective optical setups; their values and signs are not interchangeable.
+The rotation calibration domain is one-axis RC rotation from -20 to +20 degrees. P1 also has a zero-rotation sweep across absolute THI Z from -5 to +5 mm; P4 covers accommodation from 0 to 5 D. Each state has nine identified fields in a 3 x 3 grid. The P1 and P4 coefficients are specific to their respective optical setups; their values and signs are not interchangeable.
 
 This document distinguishes existing fitted results from the proposed reduced joint model. Reported results refer to repository revision `f6732f2d523bd3ee13a216de88ad4c1cb174a2a3`. Rewriting this specification does not change the collectors, fitted artifacts, or analysis implementations.
 
@@ -17,17 +17,19 @@ This document distinguishes existing fitted results from the proposed reduced jo
 Let `i` identify a fixed field point and let
 
 $$
-\mathbf p_{j,i}(\theta,A)
-=\begin{bmatrix}X_{j,i}(\theta,A)\\Y_{j,i}(\theta,A)\end{bmatrix},
-\qquad j\in\{1,4\},
+\mathbf p_{1,i}(\theta,Z)
+=\begin{bmatrix}X_{1,i}(\theta,Z)\\Y_{1,i}(\theta,Z)\end{bmatrix},
+\qquad
+\mathbf p_{4,i}(\theta,A)
+=\begin{bmatrix}X_{4,i}(\theta,A)\\Y_{4,i}(\theta,A)\end{bmatrix},
 $$
 
-be its real image coordinates in millimeters, relative to the center ray at the same state. For P1, omit `A`.
+be the setup-specific real image coordinates in millimeters, relative to the center ray at the same state. P1 depends on rotation `theta` and its expanded sweep's absolute THI coordinate `Z`; P4 depends on rotation `theta` and accommodation `A`.
 
-Define the empirical zero-rotation baselines as
+Define the empirical zero-rotation baselines at the selected P1 Z plane as
 
 $$
-\mathbf b_{1,i}=\mathbf p_{1,i}(0),
+\mathbf b_{1,i}(Z)=\mathbf p_{1,i}(0,Z),
 \qquad
 \mathbf b_{4,i}(A)=\mathbf p_{4,i}(0,A).
 $$
@@ -40,15 +42,15 @@ The intended decomposition is
 
 $$
 \boxed{
-\widehat{\mathbf p}_{1,i}(\theta)
-=K_1(\theta;\mathbf b_{1,i}),
+\widehat{\mathbf p}_{1,i}(\theta,Z)
+\approx m(Z)K_1(\theta;\mathbf b_{1,i}(0)),
 \qquad
 \widehat{\mathbf p}_{4,i}(\theta,A)
 =K_4(\theta,A;\widehat{\mathbf b}_{4,i}(A)).
 }
 $$
 
-P1 has a fixed baseline. P4 has an accommodation-dependent baseline. Start with no accommodation dependence in the rotation coefficients, and add it only when coordinate errors require it.
+For P1, use the measured Z=0 baseline and model the zero-rotation Z dependence with the normalized scale `m(Z)=1+alpha_Z Z`, so `b_1(Z)≈m(Z)b_1(0)`. The rotation fit itself is currently available only at Z=0. P4 has an accommodation-dependent baseline. Start with no accommodation dependence in the rotation coefficients, and add it only when coordinate errors require it.
 
 ## Reduced rotation mapping
 
@@ -92,7 +94,47 @@ Check this condition on the field region being modeled, not only at the center. 
 
 ## P1 fixed-baseline barrel plus vertical keystone
 
-P1 uses its actual real-coordinate grid at zero rotation as a constant baseline. Its calibration contains 401 rotations and nine fields per rotation. The existing analysis independently estimates three keystone parameters at each angle using algebraic initialization and damped Cartesian Gauss-Newton refinement, then fits unconstrained quadratics to the resulting parameter curves. See the [P1 transform report](data/p1_rotation_transform/report.md).
+P1 uses its actual real-coordinate grid at zero rotation as its empirical baseline. At the selected Z plane, its rotation calibration contains 401 rotations and nine fields per rotation. The existing analysis independently estimates three keystone parameters at each angle using algebraic initialization and damped Cartesian Gauss-Newton refinement, then fits unconstrained quadratics to the resulting parameter curves. See the [P1 transform report](data/p1_rotation_transform/report.md).
+
+**Dataset status and provenance:** The canonical P1 grid has 51 absolute `Cornea_ENT_D` THI planes from -5 to +5 mm. The P1 rotation report remains the earlier single-slice analysis, associated with a prior sequence revision and a recorded THI baseline of -35 mm; its source hash does not establish identity with the current sequence. A numerical audit found that its entire 3,609-row slice (401 rotations by nine fields) matches the current sweep's Z=0 slice to floating-point roundoff. Therefore its reported rotation fit remains numerically applicable at Z=0. It does not establish rotation behavior at the other 50 Z planes. The current sequence uses a 1 mm baseline; absolute THI Z here is the coordinate recorded by the sweep and is not relabeled as displacement from that baseline.
+
+### Z-dependent zero-rotation barrel baseline and magnification
+
+The zero-rotation sweep isolates the baseline change over the 51 absolute THI Z planes. Let `R_i(Z)` be the measured real-coordinate vector for field `i` and let `R_i(0)` be the actual measured real grid at Z=0. Fit one isotropic scale at each Z by pooled least squares over the nine matched fields:
+
+$$
+m(Z)=\frac{\sum_i \mathbf R_i(0)\cdot\mathbf R_i(Z)}
+           {\sum_i \|\mathbf R_i(0)\|^2},\qquad
+\mathbf R_i(Z)\approx m(Z)\mathbf R_i(0).
+$$
+
+The center is harmless in the pooled fit because its center-relative reference vector is zero. For pointwise diagnostics, use the signed projected ratio `R_i(0)·R_i(Z)/||R_i(0)||^2` on the eight noncentral points; do not divide individual X or Y components, which can be zero. The parallel paraxial scale `m_p(Z)` is calculated the same way from the matched paraxial grids. Both ratios are dimensionless; Z is in millimeters.
+
+The working P1 simplification is a linear, zero-normalized scale:
+
+$$
+m(Z)=1+\alpha_Z Z,\qquad
+\alpha_Z=0.00295165270232\ \mathrm{mm}^{-1}.
+$$
+
+Here `Z` is the absolute THI `Cornea_ENT_D` coordinate in millimeters; the 1 mm sequence baseline is not subtracted. The coefficient is the least-squares slope of the 51 saved real-grid magnification ratios with the intercept fixed at one. This enforces `m(0)=1`, consistent with the reference grid. Its ratio RMSE is **1.01275e-4**, and its maximum absolute ratio error is **2.19022e-4** over the 51 planes. The endpoint and selected-plane real-grid ratios are:
+
+| Absolute THI Z (mm) | -5 | -2.6 | 0 | +2.6 | +5 |
+|---|---:|---:|---:|---:|---:|
+| Real-grid `m(Z)` | 0.9854583393 | 0.9923851807 | 1 | 1.007732594 | 1.014977286 |
+| Paraxial `m_p(Z)` | 0.9854551017 | 0.9923834777 | 1 | 1.007734340 | 1.014980683 |
+
+For comparison, the unconstrained linear least-squares fit is `m(Z)=1.00007550219+0.00295165270232 Z`, with ratio RMSE `6.74981e-5` and maximum error `1.43520e-4`. A quadratic fit constrained near identity, `m(Z)=0.999999995615+0.00295165270232 Z+8.71229730269e-6 Z^2`, reduces those errors to `5.14398e-7` and `1.21943e-6`. The simpler `1+alpha_Z Z` relation is the working model; retain the quadratic as an empirical higher-accuracy description when its extra term matters.
+
+The errors above for the unconstrained direct per-plane scale fit are diagnostics of how close each sampled plane is to an isotropic scale; they are not the error of the simplified linear model. Under the working `1+alpha_Z Z` model at theta=0, the largest coordinate RMSE across nine points and both coordinates is **0.29549 micrometers**, and the largest Euclidean point error is **0.50326 micrometers**. For the direct pooled per-plane scale fit, the corresponding largest errors are **0.00120667 micrometers** and **0.00206133 micrometers**. Dividing each real grid by its directly fitted per-plane scale and comparing it with the Z=0 grid gives a largest coordinate RMSE of **0.00118886 micrometers**. These separate measures show that the sampled zero-rotation change is well summarized by common magnification, while the constrained linear scale still has a small, measurable curvature residual.
+
+The magnification factor was also checked at five rotations (`theta=-10,-5,0,+5,+10` degrees), each over all 51 Z planes. Relative to the `theta=0` real-grid scale curve, the largest absolute factor difference was **1.94155e-6**, equivalent to a maximum relative variation `|m(theta,Z)/m(0,Z)-1|` of **0.00019129%**. Applying the exact `theta=0` scale curve to those other-angle grids left at most **0.007220 micrometers coordinate RMSE** and **0.017804 micrometers maximum point error**. This supports theta-independence over these five tested angles only; the other 396 rotation values in the full sweep have not been checked for Z-independence.
+
+The resulting proposed composition is `p_1(theta,Z)≈m(Z) K_1(theta;b_1(0))`: apply the existing keystone map to the Z=0 empirical real baseline, then multiply its output coordinates by `m(Z)`. In homogeneous coordinates the scale is `S(m)=diag(m,m,1)` and the composition is `S(m)H_1(theta)`, in that order. It does not assert that scale commutes with keystone. The keystone fit remains the existing Z=0 fit. At theta=0, the linear scale alone has the residual stated above; using the exact theta=0 scale curve at each tested nonzero angle leaves at most **0.007220 micrometers coordinate RMSE** and **0.017804 micrometers maximum point error**. This composition is a simplified model supported by the zero-rotation sweep and five-angle check, not a full 401-angle joint calibration.
+
+The separate per-Z radial fits use `real = paraxial * (1 + k1*r^2)` with paraxial radius in millimeters and `k1` in mm^-2. The direct quadratic summary is `k1(Z)=-0.0130398764628 + 7.68681341348e-5 Z - 1.13154451225e-7 Z^2` (coefficient units mm^-2, mm^-3, mm^-4). Since paraxial image scale also changes with Z, `k1` alone mixes scale and barrel strength. The sampled dimensionless `k1*r_edge^2` varies by only 0.00898% of its absolute mean; the edge and corner radial percentages vary by less than 0.001 percentage point. As a cross-check, `k1(Z)*m_p(Z)^2` spans 1.17e-6. The per-grid radial-model coordinate RMSE is **2.24–2.31 micrometers**, so it is a distinct and larger fit error than the roughly 0.0012-micrometer residual from the inter-Z common-scale comparison.
+
+See the [expanded P1 radial and magnification report](data/p1_radial_distortion_fit/p1_radial_distortion_fit.md), [magnification plot](data/p1_radial_distortion_fit/p1_z_magnification.png), [saved magnification data](data/p1_radial_distortion_fit/p1_z_magnification.pkl), and [analysis script](Script/fit_p1_radial_distortion.py). The five-angle check used the existing [P1 sweep pickle](data/distortion_grid/distortion_grid.pkl); no new artifact was produced.
 
 ### Existing results
 
@@ -318,14 +360,14 @@ The full P4 sweep already exists; joint fitting does not require another CODE V 
 
 ## Current status and source artifacts
 
-**Established:** separate P1 rotation, P4 zero-rotation radial accommodation, and P4 0-D rotation fits; setup-specific approximate coefficient parity; the P1 identity/parity simplification calculation above.
+**Established:** separate P1 rotation at the numerically matched Z=0 baseline, P1 zero-rotation radial and magnification summaries over Z (including a linear normalized working approximation), P4 zero-rotation radial accommodation, and P4 0-D rotation fits; setup-specific approximate coefficient parity; the P1 identity/parity simplification calculation above. A direct Z-dependence check at five P1 rotation angles supports use of the same scale over those tested angles; it does not check all 401 angles or constitute a full joint calibration.
 
 **Proposed for fitting and validation:** the compact P4 baseline scale function, shared rotation coefficients across accommodation, a jointly calibrated reduced transformation, and any restricted-domain constant approximation. No new joint-fit or hardware-precision result is claimed here.
 
-The working recommendation is a fixed P1 baseline, an accommodation-dependent P4 baseline, and only the rotation or coupling terms whose omission matters in coordinate space.
+The working recommendation is the P1 Z=0 measured real baseline transformed by the Z=0 keystone map and then scaled by `m(Z)=1+0.00295165270232 Z`, as specified above, along with an accommodation-dependent P4 baseline and only the rotation or coupling terms whose omission matters in coordinate space. The Z scaling check covers five angles; extension across the full rotation sweep remains to be established.
 
 Source artifacts:
 
-- [P1 raw CSV](data/distortion_grid/distortion_grid.csv), [P1 transform report](data/p1_rotation_transform/report.md), and [P1 runner](Script/analyze_p1_rotation_transform.py).
+- [P1 raw CSV](data/distortion_grid/distortion_grid.csv), [P1 transform report](data/p1_rotation_transform/report.md), [P1 radial/magnification report](data/p1_radial_distortion_fit/p1_radial_distortion_fit.md), and [P1 runners](Script/analyze_p1_rotation_transform.py), [radial/magnification analysis](Script/fit_p1_radial_distortion.py).
 - [P4 sweep metadata](data/distortion_grid_p4/metadata.json), [P4 radial report](data/p4_radial_distortion_fit/p4_radial_distortion_fit.md), and [P4 rotation report](data/p4_rotation_transform/report.md).
 - [HANDOFF.md](HANDOFF.md) for collection provenance and environment requirements; [Summary.md](Summary.md) for the existing fit summaries.

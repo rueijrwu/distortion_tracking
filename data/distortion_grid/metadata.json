@@ -1,0 +1,36 @@
+﻿{
+    "collected_at":  "2026-10-09T00:14:11-04:00",
+    "lens_file":  "Lens/p1_ME.seq",
+    "lens_sha256":  "21406BCF60699186469B18292DE848698C235B1DC2D16032ABC2171688F01515",
+    "z_field_semantics":  "Absolute THI in mm at surface Cornea_ENT_D; source baseline THI is 1.0 mm.",
+    "z_surface":  "Cornea_ENT_D",
+    "z_min_mm":  5,
+    "z_max_mm":  -5,
+    "z_count":  51,
+    "z_step_mm":  -0.2,
+    "rotation_surface":  "RC",
+    "rotation_min_deg":  -20,
+    "rotation_max_deg":  20,
+    "rotation_count":  401,
+    "rotation_step_deg":  0.1,
+    "grid_lines":  3,
+    "rows_per_state":  9,
+    "completed_states":  20451,
+    "total_rows":  184059,
+    "dtype_fields":  [
+                         "eye_rotation_deg",
+                         "z_mm",
+                         "field_x_relative",
+                         "field_y_relative",
+                         "paraxial_x_mm",
+                         "paraxial_y_mm",
+                         "real_x_mm",
+                         "real_y_mm",
+                         "radial_distortion_pct",
+                         "tangential_distortion_pct"
+                     ],
+    "readbacks_verified":  [
+                               "ADE on RC",
+                               "THI on Cornea_ENT_D"
+                           ]
+}
