@@ -6,13 +6,13 @@ WL    850.0
 REF   1
 WTW   1
 INI   'RW '
-XOB   0.0 2.0 2.0 2.0 0.0 0.0 -2.0 -2.0 -2.0
-YOB   0.0 2.0 0.0 -2.0 2.0 -2.0 2.0 0.0 -2.0
-WTF   1.0 1.0 1.0 1.0 1.0 1.0 1.0 1.0 1.0
-VUX   0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0
-VLX   0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0
-VUY   0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0
-VLY   0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0
+XOB   0.0
+YOB   0.0
+WTF   1.0
+VUX   0.0
+VLX   0.0
+VUY   0.0
+VLY   0.0
 DOR   1.15 1.05 1.1
 PRV  
   PWL 550.0
@@ -47,7 +47,7 @@ SO    0.0 -17.0
 S     0.0 0.0
   SLB "SRC_RC"
   XDE 0.0; YDE 0.0; ZDE 0.0
-  ADE -60.0; BDE 0.0; CDE 0.0
+  ADE -35.0; BDE 0.0; CDE 0.0
 S     0.0 -13.8
   SLB "Corena_ENT"
 S     0.0 13.8
@@ -64,7 +64,7 @@ S     0.0 0.0
 S     0.0 17.0
   SLB "CAM_RC"
   XDE 0.0; YDE 0.0; ZDE 0.0
-  ADE -60.0; BDE 0.0; CDE 0.0
+  ADE -35.0; BDE 0.0; CDE 0.0
 S     0.0 0.0
   SLB "CAM_AIM_ANG"
   XDE 0.0; YDE 0.0; ZDE 0.0
@@ -91,6 +91,6 @@ UID   S9 "dbc9692f-ecde-4f0b-9097-3e3947960eb0"
 UID   S10 "231c8fd9-16f2-48d2-a8a2-2ecfda333888"
 GO 
 CLS   WVL RED
-CLS   FLD RED BLU FOR MAG YEL CYA GRA PIN RUS
+CLS   FLD RED
 DER   VAL I1 0.0002190486223946616
 GO 

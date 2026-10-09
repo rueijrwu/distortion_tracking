@@ -1,4 +1,4 @@
-RDM;LEN       "VERSION: 2024.03 SR1       LENS VERSION: 91       Creation Date:  9-Oct-2026"
+RDM;LEN       "VERSION: 2024.03 SR1       LENS VERSION: 91       Creation Date:  8-Oct-2026"
 TITLE 'P1'
 NA    -0.0955
 DIM   M
@@ -56,7 +56,7 @@ S     7.77 0.0 REFL
   CIR 5.0
   CON
   K   -0.15
-S     0.0 0.0
+S     0.0 1.0
   SLB "Cornea_ENT_D"
   RET S2
 S     0.0 -35.0
