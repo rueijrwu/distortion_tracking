@@ -1,94 +1,331 @@
-# P1 and P4 barrel and keystone models
+# P1 and P4 distortion transformations
 
-This note documents the empirical baseline distortion and rotation-dependent transform analyses for the P1 and P4 optical setups. P1 uses a fixed real-coordinate grid at zero rotation as the barrel-distorted baseline, then fits a reduced vertical-keystone transform across eye rotation. P4 separately fits radial `k1` versus accommodation at zero rotation and fits the same type of baseline-plus-keystone transform across rotation at 0 D. These analyses use distinct optical setups and their parameters are not interchangeable.
+## Purpose and modeling principle
+
+Describe the center-relative image pattern as a function of one-axis eye rotation `theta` and accommodation `A`, using the fewest dependencies needed at the measurement scale.
+
+**A parameter may be held constant when removing its dependence introduces an acceptable image-coordinate error over the intended operating domain.** Approximately **1 micrometer (0.001 mm)** is the project measurement-noise reference. Small coefficient variation alone is not sufficient: its effect must be evaluated after the complete spatial transformation.
+
+The working model treats P1 as accommodation-independent and P4 as accommodation-dependent. P1 may still require rotation-dependent deformation. The available P1 dataset has no accommodation dimension, so accommodation independence is a modeling premise, not a result of a P1 accommodation sweep.
+
+The current calibration domain is one-axis RC rotation from -20 to +20 degrees. P4 additionally covers accommodation from 0 to 5 D. Each state has nine identified fields in a 3 x 3 grid. The P1 and P4 coefficients are specific to their respective optical setups; their values and signs are not interchangeable.
+
+This document distinguishes existing fitted results from the proposed reduced joint model. Reported results refer to repository revision `f6732f2d523bd3ee13a216de88ad4c1cb174a2a3`. Rewriting this specification does not change the collectors, fitted artifacts, or analysis implementations.
+
+## Coordinates and baseline convention
+
+Let `i` identify a fixed field point and let
+
+$$
+\mathbf p_{j,i}(\theta,A)
+=\begin{bmatrix}X_{j,i}(\theta,A)\\Y_{j,i}(\theta,A)\end{bmatrix},
+\qquad j\in\{1,4\},
+$$
+
+be its real image coordinates in millimeters, relative to the center ray at the same state. For P1, omit `A`.
+
+Define the empirical zero-rotation baselines as
+
+$$
+\mathbf b_{1,i}=\mathbf p_{1,i}(0),
+\qquad
+\mathbf b_{4,i}(A)=\mathbf p_{4,i}(0,A).
+$$
+
+These baselines already contain the sampled barrel distortion. Applying another radial correction to an empirical real-coordinate baseline would double-count that correction. A fitted radial model is an alternative way to represent the baseline from paraxial coordinates, not an extra correction to the same real baseline.
+
+The rotation source must be the zero-rotation baseline with matching field identities, not the paraxial grid at the rotation being predicted. All quantities here describe relative pattern deformation; absolute center displacement would require a separate translation model.
+
+The intended decomposition is
+
+$$
+\boxed{
+\widehat{\mathbf p}_{1,i}(\theta)
+=K_1(\theta;\mathbf b_{1,i}),
+\qquad
+\widehat{\mathbf p}_{4,i}(\theta,A)
+=K_4(\theta,A;\widehat{\mathbf b}_{4,i}(A)).
+}
+$$
+
+P1 has a fixed baseline. P4 has an accommodation-dependent baseline. Start with no accommodation dependence in the rotation coefficients, and add it only when coordinate errors require it.
+
+## Reduced rotation mapping
+
+For a baseline point `b = [x_b, y_b]^T`, use the existing vertical-keystone family:
+
+$$
+K_j(\theta,A;\mathbf b)=
+\begin{bmatrix}
+\dfrac{s_{x,j}(\theta,A)x_b}{1+q_j(\theta,A)y_b}\\[2mm]
+\dfrac{s_{y,j}(\theta,A)y_b}{1+q_j(\theta,A)y_b}
+\end{bmatrix},
+\qquad
+H_j=\begin{bmatrix}s_{x,j}&0&0\\0&s_{y,j}&0\\0&q_j&1\end{bmatrix}.
+$$
+
+The shared denominator changes horizontal width with vertical position as well as vertical position itself. `s_x` and `s_y` are dimensionless; `q` has units mm^-1. Center-relative coordinates remove translation, while the nominal reflection symmetry motivates omitting shear and horizontal perspective. This is a restricted spatial family, not a general model of every optical distortion.
+
+### Minimal coefficient functions
+
+The reported coefficient curves support approximately even scale changes and an odd keystone change with rotation. The first reduced candidate is therefore
+
+$$
+\boxed{
+ s_{x,j}(\theta)=1+\alpha_j\theta^2,
+ \qquad s_{y,j}(\theta)=1+\beta_j\theta^2,
+ \qquad q_j(\theta)=\gamma_j\theta.
+}
+$$
+
+This has three rotation coefficients per reflection instead of three unconstrained quadratic coefficient curves with nine coefficients. It enforces `H_j(0)=I`. For the joint version, preserve `H_4(0,A)=I` so baseline changes are assigned to the baseline rather than absorbed into the rotation scales.
+
+With `theta` in degrees, `alpha` and `beta` have units degree^-2 and `gamma` has units mm^-1 degree^-1. Numerical fitting may use `t=theta/20`, provided the saved basis and conversion are explicit. Existing transform artifacts use `[1,t,t^2]`.
+
+Require positive scales and a denominator bounded away from zero over the accepted domain:
+
+$$
+1+q_j(\theta,A)b_{j,i,y}(A)\geq\delta>0.
+$$
+
+Check this condition on the field region being modeled, not only at the center. Symmetry and identity are proposed constraints for the reduced fit; the existing coefficient fits were unconstrained.
+
 ## P1 fixed-baseline barrel plus vertical keystone
 
-This is the P1 rotation-dependent transform analysis. P1 supplies 401 eye-rotation angles from -20 to +20 degrees and nine field points per angle, with no accommodation dimension. The fixed source is the actual P1 real-coordinate grid at theta=0. This carries the sampled baseline barrel distortion into every prediction; the paraxial theta=0 grid is saved for context but is not the source of this transform. The analysis does not infer or fit P1 accommodation dependence.
+P1 uses its actual real-coordinate grid at zero rotation as a constant baseline. Its calibration contains 401 rotations and nine fields per rotation. The existing analysis independently estimates three keystone parameters at each angle using algebraic initialization and damped Cartesian Gauss-Newton refinement, then fits unconstrained quadratics to the resulting parameter curves. See the [P1 transform report](data/p1_rotation_transform/report.md).
 
-The fitted rotation-dependent mapping is
+### Existing results
 
-\[
-X=\frac{s_x x_0}{1+q y_0},\qquad
-Y=\frac{s_y y_0}{1+q y_0},\qquad
-H=\begin{bmatrix}s_x&0&0\\0&s_y&0\\0&q&1\end{bmatrix}.
-\]
+| P1 result | Direct per-angle transform | Unconstrained quadratic parameter approximation |
+|---|---:|---:|
+| Coordinate RMSE range, micrometers | 0-5.95020 | 0.0521408-5.96587 |
+| Mean per-angle coordinate RMSE, micrometers | 3.06366 | 3.06866 |
+| Maximum Euclidean point error, micrometers | 11.1749 | 11.1511 |
 
-Coordinates are center-relative and the origin is centered, so translations are zero. P1 has exact left-right reflection parity and rotation-dependent top-bottom asymmetry, supporting the vertical denominator orientation. The reduced family excludes shear and horizontal perspective. It is an approximation to the rotation-dependent change beyond the fixed empirical baseline; its residuals can include other optical changes the restricted keystone family cannot represent.
+Coordinate RMSE uses all nine points and both coordinates. The reported means are means of per-angle RMSE values, not pooled RMSE. The direct fit at zero rotation is identity to numerical precision. All direct fits converged; the minimum sampled direct denominator is 0.987474.
 
-The three parameters at each of the 401 angles are estimated together using the batched algebraic initialization and damped Cartesian Gauss-Newton refinement. A separate unconstrained ordinary least-squares quadratic is fitted in-sample to all 401 estimates. It uses the scaled numerical basis `[1,t,t^2]`, `t=theta/20`, with the following equivalent physical-degree form `c(theta)=c0+c1*theta+c2*theta^2`:
+### Supported coefficient simplification
 
-| Parameter | Units | c0 | c1 per degree | c2 per degree^2 | Coefficient RMSE | Coefficient max error |
-|---|---|---:|---:|---:|---:|---:|
-| sx | unitless | 1.00002080386 | -4.25403635929e-14 | 1.85435557047e-5 | 1.851074e-5 | 5.422594e-5 |
-| sy | unitless | 1.00005054265 | 5.03892066961e-14 | 6.46083406774e-5 | 4.5239633e-5 | 0.00013342668 |
-| q | mm^-1 | 2.73730848819e-13 | 0.000378982990846 | -1.09741946433e-14 | 7.5720203e-5 | 0.00019728487 |
+The dominant terms in the existing P1 coefficient curves provide the following reduced-model starting values:
 
-The `theta=0` direct baseline-to-itself fit estimates `(sx, sy, q)=(1, 1, -8.23e-18 mm^-1)`; identity was not imposed. At the sweep endpoints the direct fits are approximately `(1.00738400, 1.02576045, -0.00738237 mm^-1)` at -20 degrees and `(1.00738400, 1.02576045, +0.00738237 mm^-1)` at +20 degrees. The sign and values are specific to the P1 optical setup and this coordinate convention; they should not be transferred to P4 or treated as universal.
+$$
+\alpha_1=1.85435557047\times10^{-5},\qquad
+\beta_1=6.46083406774\times10^{-5},\qquad
+\gamma_1=3.78982990846\times10^{-4},
+$$
 
-| theta (degrees) | Direct coordinate RMSE (um) | Quadratic-composed coordinate RMSE (um) |
-|---:|---:|---:|
-| -20 | 5.95020 | 5.96587 |
-| -15 | 4.56965 | 4.57003 |
-| -10 | 3.09703 | 3.10242 |
-| -5 | 1.56362 | 1.56962 |
-| 0 | 0 | 0.0521408 |
-| +5 | 1.56362 | 1.56962 |
-| +10 | 3.09703 | 3.10242 |
-| +15 | 4.56965 | 4.57003 |
-| +20 | 5.95020 | 5.96587 |
+with the units defined above. These are extracted from the unconstrained fit, not newly refitted constrained coefficients.
 
-Coordinate RMSE is computed over the nine sampled fields and both coordinates (18 scalar residuals). Direct coordinate RMSE ranges from 0 to 5.95020 um (mean 3.06366 um); the quadratic-composed result ranges from 0.0521408 to 5.96587 um (mean 3.06866 um). Direct maximum Euclidean point error reaches 11.1749 um at -20 degrees, field (-1,+1); the quadratic-composed maximum reaches 11.1511 um. The two-axis point RMS is respectively 0–8.41486 um (mean 4.33267 um) and 0.0737382–8.43701 um (mean 4.33974 um). All direct fits converged; initializer rank is three and condition numbers range from 2.11103 to 2.15110. The minimum sampled denominator is 0.987474.
+Replacing the fitted scale intercepts by one and removing the nearly zero symmetry-inconsistent terms changes the existing quadratic predictions by **0.052145 micrometers pooled coordinate RMS**, with **0.086877 micrometers maximum absolute coordinate change**. The worst per-angle coordinate RMS change is 0.052152 micrometers.
 
-The keystone residual includes optical changes outside its three-parameter family. The quadratic coefficient curves are an in-sample summary of direct keystone parameters, not held-out validation or a claim that the optical response is exactly quadratic. The report, data, coefficient artifact, and plots are in [`data/p1_rotation_transform`](data/p1_rotation_transform); the runner is [`Script/analyze_p1_rotation_transform.py`](Script/analyze_p1_rotation_transform.py).
+These are diagnostic calculations using the nine baseline coordinates in the [P1 CSV](data/distortion_grid/distortion_grid.csv), the published physical-degree coefficients, and all 401 sampled angles. For reproducibility, evaluate both the original curves `c0+c1*theta+c2*theta^2` and the reduced functions above through the same `K_1`, then compare their predicted coordinates. No coefficient refit is involved. This comparison measures simplification error, not total error against CODE V.
+
+### A constant baseline is not a constant transformed pattern
+
+Holding the entire P1 pattern at its zero-rotation coordinates is a separate, much stronger reduction:
+
+$$
+\widehat{\mathbf p}_{1,i}(\theta)=\mathbf b_{1,i}.
+$$
+
+At -20 degrees, direct subtraction of the nine stored P1 coordinates from their zero-rotation baseline gives **30.424416 micrometers coordinate RMSE** and **69.985236 micrometers maximum absolute coordinate error**. Thus the entire P1 transformation cannot be frozen over the full +/-20-degree domain at a 1-micrometer scale.
+
+A constant pattern or individual constant rotation parameters remain candidates for a narrower declared angle/field range. Test them using the coordinate-error rule below; do not infer their acceptability from small percentage changes in `s_x`, `s_y`, or `q`.
+
+### Remaining spatial-model error
+
+The small coefficient-simplification error does not remove the existing keystone residual. For example, at -20 degrees the P1 side-midpoint fields `(field_x,field_y)=(+/-1,0)` have a real Y coordinate of approximately **8.471582 micrometers**, while their baseline Y is zero to numerical precision. The restricted mapping predicts `Y=0` when `y_b=0`, regardless of its three parameter values.
+
+This is a concrete missing spatial deformation, not a polynomial-order problem. A total 1-micrometer requirement over the full domain therefore needs an appropriate spatial-model extension or a smaller accepted domain; changing only the angle dependence of these three parameters cannot represent this component.
 
 ## P4 optical-model analyses
 
-The P4 results below describe two separate analyses of the saved P4 grid in `data/distortion_grid_p4/distortion_grid.pkl`. The radial accommodation fit uses zero-rotation grids at multiple accommodation values; the rotation transform uses the zero-diopter baseline and varies eye rotation. Their parameters and residuals answer different questions and should not be combined as if they were one jointly calibrated model.
+The P4 collector has already saved the full 51-accommodation by 401-rotation by nine-field sweep: 184,059 rows covering 20,451 states. See [HANDOFF.md](HANDOFF.md). Existing reported fits use two slices of that data: radial distortion at zero rotation, and rotation transforms at 0 D. A jointly calibrated reduced model has not yet been established by those reports.
 
-### Radial distortion versus accommodation at zero rotation
+### Accommodation-dependent baseline
 
-At eye rotation 0 degrees, each accommodation group supplies nine field points with paraxial coordinates `(x,y)` and center-relative real coordinates `(real_x,real_y)`. The tested forward model is
+For diagnostics, first use the empirical baseline `b_4,i(A)=p_4,i(0,A)` at each accommodation. This isolates rotation-model error from baseline-approximation error.
 
-\[
-real_x=x(1+k_1r^2),\qquad real_y=y(1+k_1r^2),\qquad r^2=x^2+y^2.
-\]
+For a compact predictive baseline, fix the reference paraxial coordinates
 
-Here `k1` has units mm^-2. A single coefficient is fitted by ordinary pooled least squares across the group's 18 X/Y coordinates. Coordinate RMSE is computed over those 18 scalar residuals, including the center's two zero residuals. The sampled 3 x 3 grid has only two distinct nonzero radii (edge midpoints and corners); the center has zero radius and supplies no leverage. Because the paraxial grid scale changes with accommodation, each group is evaluated using its own paraxial coordinates.
+$$
+\mathbf u_i=\mathbf p_{\mathrm{para},4,i}(0,0),
+$$
 
-The saved study fits accommodation dependence to 51 per-accommodation estimates from 0 to 5 D in 0.1 D steps. It compares an unconstrained offset exponential, `k1=d+a exp(b A)`, with an unconstrained quadratic, `k1=p0+p1 A+p2 A^2`. For the exponential, `(d,a,b)=(-0.0195347321373, 0.000993232205102, 0.235926474606)`, with `b` in D^-1; its coefficient-curve RMSE is `4.126091e-6 mm^-2` (0.18615% of the observed k1 range). For the quadratic, `(p0,p1,p2)=(-0.0185179003996, 0.000180197179361, 5.15785422657e-5)` with the corresponding powers of D in the coefficient units; its coefficient-curve RMSE is `6.0346857e-6 mm^-2` (0.27226%). These are in-sample fits to the 51 estimated coefficients, not independent validation of an accommodation law.
+and test
 
-Across the 51 groups, the one-parameter radial model's coordinate RMSE ranges from `0.000534472` to `0.00110191 mm` (mean `0.000807812 mm`). The maximum absolute scalar-coordinate residual ranges from `0.00106894` to `0.00220383 mm` (mean `0.00161562 mm`). At 0 D, `k1=-0.01852833121 mm^-2`, coordinate RMSE is `0.00110191 mm`, and maximum absolute scalar-coordinate residual is `0.00220383 mm`. The RMSE and maximum are different summaries over the 18 scalar coordinate residuals; the latter is not a Euclidean point error. These residuals describe adequacy on the sampled grid only. With two nonzero radii, they do not establish behavior between sampled radii or prove that radial distortion is the only physical effect.
+$$
+\mathbf z_i(A)=m(A)\mathbf u_i,\qquad m(0)=1,
+$$
 
-### Eye rotation at zero diopters: baseline plus vertical keystone
+$$
+\boxed{
+\widehat{\mathbf b}_{4,i}(A)
+=\left[1+k(A)\|\mathbf z_i(A)\|^2\right]\mathbf z_i(A).
+}
+$$
 
-The separate P4 rotation analysis selects accommodation 0 D and matches all 401 rotations from -20 to +20 degrees to the same nine field identities. It fixes the source grid to the actual **real** coordinates at 0 D and zero rotation. This retains the baseline barrel distortion at the sampled points; it does not use each rotated grid's paraxial coordinates as the transform source.
+Here `m(A)` is a dimensionless paraxial scale and `k(A)` is the radial coefficient in mm^-2, called `k1` in the current reports. The radial radius is computed from `z` in millimeters, not from normalized field coordinates or from the distorted output.
 
-The fitted reduced transform is
+The existing analysis uses each accommodation's own paraxial coordinates, whose scale changes with accommodation. Consequently, fitting only `k(A)` while holding the paraxial grid fixed does not describe the complete baseline change. The scalar `m(A)` representation is a candidate to fit and check, not an already validated result. If isotropic scale is insufficient, test a diagonal scale with separate X/Y functions before adding a more general baseline mapping.
 
-\[
-X=\frac{s_x x_0}{1+q y_0},\qquad
-Y=\frac{s_y y_0}{1+q y_0},\qquad
-H=\begin{bmatrix}s_x&0&0\\0&s_y&0\\0&q&1\end{bmatrix}.
-\]
+Calibrate the paraxial scale from the paraxial data and the radial correction from the real data under this fixed coordinate convention. This avoids allowing baseline scale to drift into `s_x(0,A)` or `s_y(0,A)`.
 
-The coordinates are center-relative, so translation is omitted. The imposed symmetry also omits shear and horizontal perspective. The shared denominator makes this a vertical-keystone model and changes horizontal width with `y0` as well as vertical position. `sx` and `sy` are dimensionless; `q` is mm^-1. Each angle's three parameters is estimated from all nine points by an algebraic least-squares initialization and damped Gauss-Newton refinement against Cartesian coordinate residuals. At zero rotation the fitted baseline-to-itself values are `sx=1`, `sy=1`, and `q=-3.45e-17 mm^-1` (estimated from the data).
+### Existing radial fit and accommodation curves
 
-The direct per-angle transforms have coordinate RMSE from 0 to `5.21325 um` (mean `1.20933 um`), with maximum Euclidean point error `10.6716 um` at +20 degrees. A separate unconstrained quadratic is fit in-sample to all 401 direct parameter estimates. Its coordinate RMSE over the same grids ranges from `0.286062` to `6.57821 um` (mean `1.848 um`), with maximum Euclidean point error up to `16.0142 um`. The quadratic coefficient fit does not enforce symmetry or an identity intercept and has no held-out-angle validation. Therefore, it is a compact empirical approximation over this sweep, not evidence that the underlying optical response is exactly quadratic.
+The current radial fit uses `real = paraxial*(1+k1*r^2)` independently at each of 51 accommodation values. Its results are:
 
-This rotation transform is calibrated only at 0 D. Accommodation dependence of `sx`, `sy`, or `q` would require separate fitting and validation across accommodation; the radial `k1(A)` fit does not supply those transform parameters. Neither P4 analysis establishes detector measurement precision: both use simulated grid coordinates and omit detector calibration, alignment, localization noise/bias, and other physical errors. Full model definitions, residual conventions, coefficient tables, and artifact details are in `data/p4_radial_distortion_fit/p4_radial_distortion_fit.md` and `data/p4_rotation_transform/report.md`.
+| P4 radial quantity | Minimum | Mean across accommodation | Maximum |
+|---|---:|---:|---:|
+| Coordinate RMSE, micrometers | 0.534472 | 0.807812 | 1.10191 |
+| Maximum absolute coordinate residual, micrometers | 1.06894 | 1.61562 | 2.20383 |
 
-### Conceptual composition across accommodation and rotation (unvalidated)
+At 0 D, `k1=-0.01852833121 mm^-2`. The coordinate RMSE includes all 18 scalar coordinates, including the center's zero residuals. A maximum scalar-coordinate residual is not a Euclidean point error.
 
-A possible future model could combine an accommodation-specific paraxial map, a radial correction calibrated against the per-accommodation grids, and a rotation-dependent transform:
+Two three-parameter accommodation curves were fitted in-sample to the estimated coefficients:
 
-\[
-P(\theta,A)=\pi\!\left(H(\theta,A)
+$$
+k(A)=d+a\exp(bA),
+$$
+
+with `(d,a,b)=(-0.0195347321373, 0.000993232205102, 0.235926474606)` and coefficient RMSE `4.126091e-6 mm^-2`; and
+
+$$
+k(A)=p_0+p_1A+p_2A^2,
+$$
+
+with `(p0,p1,p2)=(-0.0185179003996, 0.000180197179361, 5.15785422657e-5)` and coefficient RMSE `6.0346857e-6 mm^-2`. `d,a,p0` are in mm^-2; `b` is in D^-1; `p1,p2` carry the corresponding inverse powers of D. These values and their definitions are in the [P4 radial report](data/p4_radial_distortion_fit/p4_radial_distortion_fit.md).
+
+Test constant and linear accommodation functions before requiring either nonlinear alternative. Retain a more complex curve only when it meaningfully improves final coordinate prediction. For a change `Delta k` at fixed paraxial coordinates, the induced baseline displacement is
+
+$$
+\Delta\mathbf b_i=(\Delta k)\|\mathbf z_i\|^2\mathbf z_i.
+$$
+
+This converts coefficient differences to the relevant coordinate scale; the complete composed prediction must still be checked. The grid has only two distinct nonzero radii, so these fits do not validate arbitrary intermediate field positions or a unique physical accommodation law.
+
+### Rotation at 0 D
+
+The current P4 rotation transform uses the actual real-coordinate baseline at zero rotation and 0 D, not the fitted radial baseline. Its spatial results are:
+
+| P4 result at 0 D | Direct per-angle transform | Unconstrained quadratic parameter approximation |
+|---|---:|---:|
+| Coordinate RMSE range, micrometers | 0-5.21325 | 0.286062-6.57821 |
+| Mean per-angle coordinate RMSE, micrometers | 1.20933 | 1.84800 |
+| Maximum Euclidean point error, micrometers | 10.6716 | 16.0142 |
+
+See the [P4 rotation report](data/p4_rotation_transform/report.md). The direct zero-rotation transform is identity to numerical precision, and the minimum sampled direct denominator is 0.943952.
+
+The dominant terms give starting values for the reduced rotation functions at 0 D:
+
+$$
+\alpha_4=1.55275895420\times10^{-4},\qquad
+\beta_4=3.02802819333\times10^{-4},\qquad
+\gamma_4=-2.34562287684\times10^{-3}.
+$$
+
+These values are neither a refit with identity constraints nor evidence that the coefficients are accommodation-independent. The parameter-curve approximation adds noticeable error for P4, while the direct spatial family also exceeds 1 micrometer at large rotations. Those two error sources require separate checks.
+
+## Minimal joint model and optional extensions
+
+The first joint candidate is
+
+$$
+\boxed{
+\widehat{\mathbf p}_{1,i}(\theta)=
 \begin{bmatrix}
-B_A\!\left(P_{\mathrm{para}}(0,A)\right)\\1
-\end{bmatrix}\right),
-\qquad
-\pi\!\left(\begin{bmatrix}X_h\\Y_h\\w_h\end{bmatrix}\right)
-=\begin{bmatrix}X_h/w_h\\Y_h/w_h\end{bmatrix}.
-\]
+\dfrac{(1+\alpha_1\theta^2)b_{1,i,x}}{1+\gamma_1\theta b_{1,i,y}}\\[2mm]
+\dfrac{(1+\beta_1\theta^2)b_{1,i,y}}{1+\gamma_1\theta b_{1,i,y}}
+\end{bmatrix},
+}
+$$
 
-Here `P_para(0,A)` denotes paraxial field coordinates at zero rotation and accommodation `A`; `B_A` would denote a baseline correction that maps those coordinates to the measured real-coordinate baseline at that accommodation; `H(theta,A)` is a homogeneous rotation-dependent transform; and `pi` performs homogeneous division. This is a proposed composition notation only. It has not been fitted or validated jointly. The existing rotation fit uses the empirical real-coordinate baseline `B_0` at zero rotation and 0 D, not a fitted radial correction, and has no calibrated accommodation dependence in `H`. The radial `k1(A)` fit is based on zero-rotation grids and does not establish `B_A` as an adequate baseline mapping when combined with rotation. A joint model would require new fitting and validation over accommodation, rotation, and field points before it could be treated as a predictive model.
+$$
+\boxed{
+\widehat{\mathbf p}_{4,i}(\theta,A)=
+\begin{bmatrix}
+\dfrac{(1+\alpha_4\theta^2)\widehat b_{4,i,x}(A)}{1+\gamma_4\theta\widehat b_{4,i,y}(A)}\\[2mm]
+\dfrac{(1+\beta_4\theta^2)\widehat b_{4,i,y}(A)}{1+\gamma_4\theta\widehat b_{4,i,y}(A)}
+\end{bmatrix}.
+}
+$$
+
+Initially, `alpha_4`, `beta_4`, and `gamma_4` are constants with respect to accommodation. P4 still depends jointly on rotation and accommodation through its baseline and the denominator. Thus no explicit accommodation dependence in the rotation coefficients does **not** mean that the complete mapping is additive or has no interaction between the two variables.
+
+Fit or test these shared coefficients against the existing full P4 sweep; do not assume that the 0-D starting values apply unchanged at every accommodation.
+
+If the coordinate-error test requires explicit coupling, add one dependency at a time. For example,
+
+$$
+q_4(\theta,A)=(\gamma_{40}+\gamma_{41}A)\theta
+$$
+
+adds one `A*theta` coefficient. Similarly,
+
+$$
+s_{x,4}(\theta,A)=1+(\alpha_{40}+\alpha_{41}A)\theta^2
+$$
+
+adds one `A*theta^2` coefficient. Keep unaffected coefficients constant. Higher accommodation powers are optional, not mandatory.
+
+If the angle curves themselves need more flexibility, test symmetry-compatible terms such as `theta^3` in `q` or `theta^4` in the scales. Do not add these to compensate for residual spatial patterns that the keystone family cannot express.
+
+The reduction hierarchy is: constant parameter; minimal angle dependence; accommodation dependence only where needed; higher-order or spatial extensions only where a measured residual requires them. Removing several terms must pass a combined test, not just separate one-term tests.
+
+## Coordinate-error rule for accepting a simplification
+
+Let `s` denote a state (`theta` for P1; `(theta,A)` for P4), and let `N` be the number of evaluated fields. Define
+
+$$
+\mathbf e_{\mathrm{total},i}(s)
+=\widehat{\mathbf p}_{\mathrm{simple},i}(s)-\mathbf p_{\mathrm{CODE\,V},i}(s),
+$$
+
+$$
+\mathbf e_{\mathrm{drop},i}(s)
+=\widehat{\mathbf p}_{\mathrm{simple},i}(s)-\widehat{\mathbf p}_{\mathrm{reference},i}(s).
+$$
+
+For either residual population, coordinate RMSE at a state is
+
+$$
+E(s)=\sqrt{\frac{1}{2N}\sum_{i=1}^{N}\left(e_{i,x}^2+e_{i,y}^2\right)}.
+$$
+
+Report the maximum absolute coordinate residual and maximum Euclidean point residual separately. With the same points, RMS Euclidean point error equals `sqrt(2)` times coordinate RMSE. Preserve the nine-point convention for comparison with current reports; separately identify any changed field subset.
+
+**Simplification criterion:** choose a declared budget `epsilon_drop` at or below the approximately 1-micrometer reference and test `max_s E_drop(s) <= epsilon_drop` over the intended domain. Also report maximum coordinate changes; an RMS criterion is not a per-coordinate bound. A constant is acceptable only on the domain where the test passes.
+
+**Total-accuracy criterion:** separately evaluate `max_s E_total(s)` against the application's total error budget. A claim of total 1-micrometer performance requires this test, not merely a passing simplification test. The current full-domain keystone fits do not meet that total target.
+
+Do not automatically allocate 1 micrometer to every omitted term. Deterministic approximation errors can reinforce each other; for the same coordinate norm,
+
+$$
+E_{\mathrm{total}}(s)\leq E_{\mathrm{reference}}(s)+E_{\mathrm{drop}}(s).
+$$
+
+Quadrature addition is not justified without suitable assumptions. Likewise, 1 micrometer of measurement noise is not a hard noise bound or an angular-precision statement. When applying the model to measured center-subtracted coordinates, use the measured noise covariance; shared center noise correlates the relative points.
+
+## Calibration and validation sequence
+
+1. **Fix coordinates and baselines.** Match field identities and units. Use the empirical zero-rotation baseline for each available accommodation to diagnose rotation fits; calibrate the compact P4 baseline separately. Do not apply the radial correction twice.
+2. **Check the spatial family before its coefficient curves.** Fit independent keystone parameters at every relevant state, including all P4 accommodations. Their residual maps reveal missing spatial deformation that higher-order coefficient curves cannot fix.
+3. **Fit the smallest global dependence.** Start with the three-coefficient P1 model and accommodation-independent P4 rotation coefficients. Fit constant/linear baseline functions first. Optimize final Cartesian coordinate residuals; parameter-curve RMSE alone is only a diagnostic.
+4. **Test reductions and additions against the same data partition.** Refit the remaining free coefficients where appropriate, then report both simplification and total errors. Include the all-constant P1 candidate only for explicitly declared restricted domains. Add individual coupling or spatial terms only when justified.
+5. **Validate the complete prediction.** Hold out rotation values and complete accommodation groups. For a compact-model held-out accommodation test, predict its baseline from the trained functions rather than reading that group's real baseline or paraxial grid. An empirical-baseline diagnostic is not end-to-end held-out validation. Inspect boundaries, per-state errors, field residuals, and denominator positivity, then check physical measurements separately.
+
+The full P4 sweep already exists; joint fitting does not require another CODE V collection. Additional field sampling is needed only to substantiate spatial interpolation beyond the current nine fields, and further collection is needed when the optical configuration or intended domain changes. Do not claim extrapolation beyond the calibrated domain.
+
+## Current status and source artifacts
+
+**Established:** separate P1 rotation, P4 zero-rotation radial accommodation, and P4 0-D rotation fits; setup-specific approximate coefficient parity; the P1 identity/parity simplification calculation above.
+
+**Proposed for fitting and validation:** the compact P4 baseline scale function, shared rotation coefficients across accommodation, a jointly calibrated reduced transformation, and any restricted-domain constant approximation. No new joint-fit or hardware-precision result is claimed here.
+
+The working recommendation is a fixed P1 baseline, an accommodation-dependent P4 baseline, and only the rotation or coupling terms whose omission matters in coordinate space.
+
+Source artifacts:
+
+- [P1 raw CSV](data/distortion_grid/distortion_grid.csv), [P1 transform report](data/p1_rotation_transform/report.md), and [P1 runner](Script/analyze_p1_rotation_transform.py).
+- [P4 sweep metadata](data/distortion_grid_p4/metadata.json), [P4 radial report](data/p4_radial_distortion_fit/p4_radial_distortion_fit.md), and [P4 rotation report](data/p4_rotation_transform/report.md).
+- [HANDOFF.md](HANDOFF.md) for collection provenance and environment requirements; [Summary.md](Summary.md) for the existing fit summaries.
