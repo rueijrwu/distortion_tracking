@@ -2,13 +2,13 @@
 
 ## Purpose and modeling principle
 
-Describe the center-relative image pattern as a function of one-axis eye rotation `theta` and accommodation `A`, using the fewest dependencies needed at the measurement scale.
+Describe the center-relative image pattern using the fewest dependencies needed at the measurement scale. Rotation is `theta`; P4 also varies with accommodation `A` and the separately studied axial coordinate `Z`.
 
 **A parameter may be held constant when removing its dependence introduces an acceptable image-coordinate error over the intended operating domain.** Approximately **1 micrometer (0.001 mm)** is the project measurement-noise reference. Small coefficient variation alone is not sufficient: its effect must be evaluated after the complete spatial transformation.
 
-The working model treats P1 as accommodation-independent and P4 as accommodation-dependent. P1 may still require rotation-dependent deformation. The available P1 dataset has no accommodation dimension, so accommodation independence is a modeling premise, not a result of a P1 accommodation sweep.
+The working model treats P1 as accommodation-independent and P4 as accommodation- and Z-dependent where measured. P1 may still require rotation-dependent deformation. The available P1 dataset has no accommodation dimension, so accommodation independence is a modeling premise, not a result of a P1 accommodation sweep.
 
-The rotation calibration domain is one-axis RC rotation from -20 to +20 degrees. P1 also has a zero-rotation sweep across absolute THI Z from -5 to +5 mm; P4 covers accommodation from 0 to 5 D. Each state has nine identified fields in a 3 x 3 grid. The P1 and P4 coefficients are specific to their respective optical setups; their values and signs are not interchangeable.
+The existing rotation calibration domain is one-axis RC rotation from -20 to +20 degrees. P1 also has a zero-rotation sweep across absolute THI Z from -5 to +5 mm. The original P4 accommodation/rotation grid covers accommodation from 0 to 5 D and has no Z sweep. A separate P4 z1 study measures absolute THI Z from -5 to +5 mm at five accommodations (0, 1, 2, 3, 4 D) and five rotations (-10, -5, 0, +5, +10 degrees). Each state has nine identified fields in a 3 x 3 grid. The P1 and P4 coefficients are specific to their respective optical setups; their values and signs are not interchangeable.
 
 This document distinguishes existing fitted results from the proposed reduced joint model. Reported results refer to repository revision `f6732f2d523bd3ee13a216de88ad4c1cb174a2a3`. Rewriting this specification does not change the collectors, fitted artifacts, or analysis implementations.
 
@@ -22,11 +22,14 @@ $$
 \qquad
 \mathbf p_{4,i}(\theta,A)
 =\begin{bmatrix}X_{4,i}(\theta,A)\\Y_{4,i}(\theta,A)\end{bmatrix},
+\qquad
+\mathbf p_{4Z,i}(\theta,A,Z)
+=\begin{bmatrix}X_{4Z,i}(\theta,A,Z)\\Y_{4Z,i}(\theta,A,Z)\end{bmatrix},
 $$
 
-be the setup-specific real image coordinates in millimeters, relative to the center ray at the same state. P1 depends on rotation `theta` and its expanded sweep's absolute THI coordinate `Z`; P4 depends on rotation `theta` and accommodation `A`.
+be the setup-specific real image coordinates in millimeters, relative to the center ray at the same state. P1 depends on rotation `theta` and its expanded sweep's absolute THI coordinate `Z`; the original P4 accommodation/rotation study depends on `theta` and `A`; the separate P4 Z study also varies `Z` and uses its own recorded lens revision.
 
-Define the empirical zero-rotation baselines at the selected P1 Z plane as
+Define the empirical zero-rotation baselines at the selected P1 Z plane and original P4 accommodation as
 
 $$
 \mathbf b_{1,i}(Z)=\mathbf p_{1,i}(0,Z),
@@ -34,11 +37,19 @@ $$
 \mathbf b_{4,i}(A)=\mathbf p_{4,i}(0,A).
 $$
 
-These baselines already contain the sampled barrel distortion. Applying another radial correction to an empirical real-coordinate baseline would double-count that correction. A fitted radial model is an alternative way to represent the baseline from paraxial coordinates, not an extra correction to the same real baseline.
+For the separate P4 Z study, the matched reference is instead
+
+$$
+\mathbf b_{4Z,i}(\theta,A)=\mathbf p_{4Z,i}(\theta,A,0),
+$$
+
+using the same accommodation and rotation as the requested nonzero-Z plane.
+
+These baselines already contain the sampled barrel distortion. In particular, the new P4 Z reference is the actual same-accommodation, same-rotation real grid at `Z=0`; it is not the theta=0 grid reused for every angle. Applying another radial correction to an empirical real-coordinate baseline would double-count that correction. A fitted radial model is an alternative way to represent the baseline from paraxial coordinates, not an extra correction to the same real baseline.
 
 The rotation source must be the zero-rotation baseline with matching field identities, not the paraxial grid at the rotation being predicted. All quantities here describe relative pattern deformation; absolute center displacement would require a separate translation model.
 
-The intended decomposition is
+The existing intended decomposition is
 
 $$
 \boxed{
@@ -50,7 +61,7 @@ $$
 }
 $$
 
-For P1, use the measured Z=0 baseline and model the zero-rotation Z dependence with the normalized scale `m(Z)=1+alpha_Z Z`, so `b_1(Z)≈m(Z)b_1(0)`. The rotation fit itself is currently available only at Z=0. P4 has an accommodation-dependent baseline. Start with no accommodation dependence in the rotation coefficients, and add it only when coordinate errors require it.
+For P1, use the measured Z=0 baseline and model the zero-rotation Z dependence with the normalized scale `m(Z)=1+alpha_Z Z`, so `b_1(Z)≈m(Z)b_1(0)`. The rotation fit itself is currently available only at Z=0. P4 has an accommodation-dependent baseline. Start with no accommodation dependence in the rotation coefficients, and add it only when coordinate errors require it. The separate P4 Z measurements support an additional, weakly accommodation-dependent scale over their tested domain; details and provenance follow below.
 
 ## Reduced rotation mapping
 
@@ -268,6 +279,44 @@ $$
 
 These values are neither a refit with identity constraints nor evidence that the coefficients are accommodation-independent. The parameter-curve approximation adds noticeable error for P4, while the direct spatial family also exceeds 1 micrometer at large rotations. Those two error sources require separate checks.
 
+### Separate P4 Z-dependent magnification study
+
+The dedicated [P4 Z magnification report](data/p4_z_magnification/p4_z_magnification.md) uses `Lens/p4_ME.len`, zoom z1, and the explicit surface selector `s"Cornea_ENT_D"`. It collects accommodations 0, 1, 2, 3, and 4 D; RC rotations -10, -5, 0, +5, and +10 degrees; 51 absolute THI values from -5 to +5 mm at 0.2 mm spacing; and nine fields per state. This is 1,275 states and 11,475 records. The active z1 THI readback after loading this LEN is 0 mm. The study applies `THI = Z` with the same sign and records both `z_distance_mm` and `z_thickness_mm`; Z is an absolute command coordinate, not a shift from another baseline.
+
+For each accommodation and rotation, let `R_i(A,theta,Z)` be the actual center-relative real-coordinate vector at field `i`. The direct scalar factor is measured relative to that same A and theta at Z=0:
+
+$$
+m_{4,\mathrm{direct}}(A,\theta,Z)=
+\frac{\sum_i \mathbf R_i(A,\theta,0)\cdot\mathbf R_i(A,\theta,Z)}
+     {\sum_i \|\mathbf R_i(A,\theta,0)\|^2}.
+$$
+
+The center point is valid in this pooled fit and contributes zero to numerator and denominator. The baseline barrel pattern at each A and theta is therefore retained in the test. The constrained linear slope is fit separately at each accommodation using only the theta=0 measured ratios:
+
+$$
+m_4(A,Z)=1+\alpha_{4Z}(A)Z,\qquad
+\alpha_{4Z}(A)=
+\frac{\sum_Z Z\,[m_{4,\mathrm{direct}}(A,0,Z)-1]}{\sum_Z Z^2}.
+$$
+
+The resulting per-accommodation slopes and rotation-independence checks are:
+
+| Accommodation (D) | `alpha_4Z(A)` (mm^-1) | Maximum relative change across tested rotations (%) |
+|---:|---:|---:|
+| 0 | 0.00295232758 | 0.00171777 |
+| 1 | 0.00295172708 | 0.00200342 |
+| 2 | 0.00295112891 | 0.00230384 |
+| 3 | 0.00295052435 | 0.00261870 |
+| 4 | 0.00294991207 | 0.00294912 |
+
+Across these five accommodations, the slopes span 0.0818504% of their mean. `m≈1+0.00295 Z` is a convenient common-slope approximation over the sampled domain, while `alpha_4Z(A)` is the more accurate result to use when accommodation-specific accuracy matters. The common slope is not a separate fitted model with an independently measured error bound. At 0 D, measured theta=0 endpoint ratios are 0.9854550569 at -5 mm and 1.014980754 at +5 mm; at 4 D they are 0.9854667801 and 1.014968316. The report lists measured ratios separately from constrained linear predictions.
+
+The comparison of `m_direct(A,theta,Z)` against `m_direct(A,0,Z)` has a maximum relative variation of 0.00294912% over the five tested rotations and 51 Z planes. Applying the theta=0 constrained linear factor to each same-A/theta Z=0 real grid gives a worst-state coordinate RMSE of 0.249 micrometers and maximum Euclidean point error of 0.511 micrometers across the tested states. Pooled over all Z/rotation states, the linear coordinate RMSE is 0.100–0.106 micrometers by accommodation. Direct per-state scalar factors reduce the pooled coordinate RMSE to 0.0120–0.0160 micrometers, with maximum absolute coordinate residuals of 0.0653–0.0854 micrometers. These are residuals against the sampled simulated grids, not hardware accuracy measurements.
+
+This Z dataset has LEN SHA-256 `fb3937e6763f27e331faa10a4863533e994030cbc0ae74364b186ba0d06d474d`. The earlier P4 accommodation/rotation dataset used hash `5e0715c70016fbcec8a49956dd2ec824a50f5c4c52ca472b0225a2523db614ac`. Because these hashes differ, treat the Z magnification result and existing P4 accommodation/radial/rotation fits as separate optical-model revisions. In particular, this study does not establish a jointly calibrated `K_4(theta,A)` across accommodation or justify composing the earlier keystone fit with `m_4(A,Z)` for end-to-end predictions. The P4 theoretical variables now include `theta`, `A`, and `Z`, but the available fits remain separate and cover different subsets/revisions.
+
+See the standalone [structured grid](data/p4_z_magnification/p4_z_magnification.pkl), [metadata and LEN hash](data/p4_z_magnification/metadata.json), [fit artifact](data/p4_z_magnification/p4_z_magnification_fit.pkl), [plot](data/p4_z_magnification/p4_z_magnification.png), and [collector/analysis script](Script/analyze_p4_z_magnification.py).
+
 ## Minimal joint model and optional extensions
 
 The first joint candidate is
@@ -356,18 +405,19 @@ Quadrature addition is not justified without suitable assumptions. Likewise, 1 m
 4. **Test reductions and additions against the same data partition.** Refit the remaining free coefficients where appropriate, then report both simplification and total errors. Include the all-constant P1 candidate only for explicitly declared restricted domains. Add individual coupling or spatial terms only when justified.
 5. **Validate the complete prediction.** Hold out rotation values and complete accommodation groups. For a compact-model held-out accommodation test, predict its baseline from the trained functions rather than reading that group's real baseline or paraxial grid. An empirical-baseline diagnostic is not end-to-end held-out validation. Inspect boundaries, per-state errors, field residuals, and denominator positivity, then check physical measurements separately.
 
-The full P4 sweep already exists; joint fitting does not require another CODE V collection. Additional field sampling is needed only to substantiate spatial interpolation beyond the current nine fields, and further collection is needed when the optical configuration or intended domain changes. Do not claim extrapolation beyond the calibrated domain.
+The original full P4 accommodation/rotation sweep and the separate five-angle P4 Z sweep already exist. Their LEN hashes differ, so the pair does not support joint fitting across `theta`, `A`, and `Z`; collect matched data from one lens revision before calibrating that combined model. Additional field sampling is needed only to substantiate spatial interpolation beyond the current nine fields, and further collection is needed when the optical configuration or intended domain changes. Do not claim extrapolation beyond the calibrated domain.
 
 ## Current status and source artifacts
 
-**Established:** separate P1 rotation at the numerically matched Z=0 baseline, P1 zero-rotation radial and magnification summaries over Z (including a linear normalized working approximation), P4 zero-rotation radial accommodation, and P4 0-D rotation fits; setup-specific approximate coefficient parity; the P1 identity/parity simplification calculation above. A direct Z-dependence check at five P1 rotation angles supports use of the same scale over those tested angles; it does not check all 401 angles or constitute a full joint calibration.
+**Established:** separate P1 rotation at the numerically matched Z=0 baseline, P1 zero-rotation radial and magnification summaries over Z (including a linear normalized working approximation), P4 zero-rotation radial accommodation and 0-D rotation fits, plus P4 linear Z magnification by accommodation over five tested rotations. These P4 studies have different lens hashes and remain separate. Setup-specific approximate coefficient parity and the P1 identity/parity simplification calculation above are also established. Direct P1 and P4 Z-dependence checks cover five angles each; neither establishes rotation independence over all 401 angles or a full joint calibration.
 
 **Proposed for fitting and validation:** the compact P4 baseline scale function, shared rotation coefficients across accommodation, a jointly calibrated reduced transformation, and any restricted-domain constant approximation. No new joint-fit or hardware-precision result is claimed here.
 
-The working recommendation is the P1 Z=0 measured real baseline transformed by the Z=0 keystone map and then scaled by `m(Z)=1+0.00295165270232 Z`, as specified above, along with an accommodation-dependent P4 baseline and only the rotation or coupling terms whose omission matters in coordinate space. The Z scaling check covers five angles; extension across the full rotation sweep remains to be established.
+The working recommendation is the P1 Z=0 measured real baseline transformed by the Z=0 keystone map and then scaled by `m(Z)=1+0.00295165270232 Z`, as specified above, along with an accommodation-dependent P4 baseline and only the rotation or coupling terms whose omission matters in coordinate space. For the separate P4 Z dataset, use `m_4(A,Z)=1+alpha_4Z(A)Z`, with the per-accommodation slopes above; `alpha_4Z≈0.00295 mm^-1` is a convenient approximation over 0–4 D. Both Z scaling checks cover five angles. The P4 Z scale and existing P4 keystone fit are not yet a matched joint model.
 
 Source artifacts:
 
 - [P1 raw CSV](data/distortion_grid/distortion_grid.csv), [P1 transform report](data/p1_rotation_transform/report.md), [P1 radial/magnification report](data/p1_radial_distortion_fit/p1_radial_distortion_fit.md), and [P1 runners](Script/analyze_p1_rotation_transform.py), [radial/magnification analysis](Script/fit_p1_radial_distortion.py).
-- [P4 sweep metadata](data/distortion_grid_p4/metadata.json), [P4 radial report](data/p4_radial_distortion_fit/p4_radial_distortion_fit.md), and [P4 rotation report](data/p4_rotation_transform/report.md).
+- [Original P4 accommodation/rotation metadata](data/distortion_grid_p4/metadata.json), [P4 radial report](data/p4_radial_distortion_fit/p4_radial_distortion_fit.md), and [P4 rotation report](data/p4_rotation_transform/report.md).
+- [Separate P4 Z magnification report](data/p4_z_magnification/p4_z_magnification.md), [plot](data/p4_z_magnification/p4_z_magnification.png), [structured grid](data/p4_z_magnification/p4_z_magnification.pkl), [metadata](data/p4_z_magnification/metadata.json), [fit artifact](data/p4_z_magnification/p4_z_magnification_fit.pkl), and [script](Script/analyze_p4_z_magnification.py). This dataset's LEN SHA-256 is `fb3937e6763f27e331faa10a4863533e994030cbc0ae74364b186ba0d06d474d`; the original P4 dataset hash is `5e0715c70016fbcec8a49956dd2ec824a50f5c4c52ca472b0225a2523db614ac`.
 - [HANDOFF.md](HANDOFF.md) for collection provenance and environment requirements; [Summary.md](Summary.md) for the existing fit summaries.
