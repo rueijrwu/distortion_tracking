@@ -43,17 +43,17 @@ PRV
   UDG C8 -0.0001396809
   UDG C9 -0.002027249
 END  
-SO    0.0 -17.0
+SO    0.0 17.0
 S     0.0 0.0
   SLB "SRC_RC"
   XDE 0.0; YDE 0.0; ZDE 0.0
   ADE -60.0; BDE 0.0; CDE 0.0
-S     0.0 -13.8
-  SLB "Corena_ENT"
 S     0.0 13.8
+  SLB "Corena_ENT"
+S     0.0 -13.8
   SLB "RC"
   XDE 0.0; YDE 0.0; ZDE 0.0
-S     -7.77 0.0 REFL
+S     7.77 0.0 REFL
   SLB "CorneaF"
   CIR 5.0
   CON
@@ -61,21 +61,18 @@ S     -7.77 0.0 REFL
 S     0.0 0.0
   SLB "Cornea_ENT_D"
   RET S2
-S     0.0 17.0
+S     0.0 -17.0
   SLB "CAM_RC"
   XDE 0.0; YDE 0.0; ZDE 0.0
   ADE -60.0; BDE 0.0; CDE 0.0
-S     0.0 0.0
-  SLB "CAM_AIM_ANG"
-  XDE 0.0; YDE 0.0; ZDE 0.0
 S     0.0 0.0
   STO
   SLB "CAM_LEN"
   CIR 0.7
   MOD
-  MFL 2.8
+  MFL -2.8
   MED 1.4
-S     0.0 3.25340689857755
+S     0.0 -3.253406898578
   THC 0
 SI    0.0 0.0
 UID   S0 "5979b989-3425-4299-96d8-aa439e68f34b"
@@ -85,10 +82,9 @@ UID   S3 "1ab21b0a-3c6d-408d-97d9-50165f76edf0"
 UID   S4 "21385eda-c9b2-4838-93d9-328fe4c3cac4"
 UID   S5 "6912c6d1-8e6a-4d17-a550-c47299c3a339"
 UID   S6 "a4c28af9-d9c3-4d99-96b6-65a52af4359b"
-UID   S7 "bfa8df47-6e44-44a5-8c75-78c12a810e4a"
-UID   S8 "1cd506b5-fa5b-40ab-b2f5-712debbb76c4"
-UID   S9 "dbc9692f-ecde-4f0b-9097-3e3947960eb0"
-UID   S10 "231c8fd9-16f2-48d2-a8a2-2ecfda333888"
+UID   S7 "1cd506b5-fa5b-40ab-b2f5-712debbb76c4"
+UID   S8 "dbc9692f-ecde-4f0b-9097-3e3947960eb0"
+UID   S9 "231c8fd9-16f2-48d2-a8a2-2ecfda333888"
 GO 
 CLS   WVL RED
 CLS   FLD RED BLU FOR MAG YEL CYA GRA PIN RUS
