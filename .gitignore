@@ -1,3 +1,4 @@
 .codex/
 .vscode/
 __pycache__/
+data/

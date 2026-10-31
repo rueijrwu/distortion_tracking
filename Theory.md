@@ -1,5 +1,9 @@
 # P1 and P4 distortion transformations
 
+**Collection status (2026-10-10):** Both replacement sweeps have validated. P1 contains 184,059 records across 51 absolute THI planes, 401 RC rotations, and nine fields per state; its pickle SHA-256 is `e29d226a0af1e5db8c3cfbf673fa92100917825f8c25d74ae71f994151519f02`. P4 contains 184,059 records across 51 accommodations (0 to 5 D at 0.1 D steps), fixed THI = 0 mm, 401 RC rotations, and nine fields per state; its pickle SHA-256 is `1d68ca2c237c76fa06539efce4911fe9ff87e203c0b11051eb4f013cbafe4b5a`. The prior P1/P4 radial and rotation fits are historical/stale; their generated result folders and old P4 grid PNG have been removed, while source scripts remain. The separate P4 Z magnification study and script remain useful prior work on their recorded lens revision; a separate new Z sweep at accommodation 0 D is planned later.
+
+The validated primary P4 sweep samples accommodations 0 through 5 D in 0.1 D steps (51 values), fixes absolute `Cornea_ENT_D` THI at 0 mm, and samples 401 RC rotations from -20 to +20 degrees in 0.1-degree steps with nine fields per state. It contains 184,059 rows across 20,451 accommodation/rotation states. Its 13-field records include `accommodation_d`, fixed `z_mm = 0`, and state center absolute image coordinates `center_absolute_x_mm` and `center_absolute_y_mm`, repeated across the nine field records. The pickle SHA-256 is `1d68ca2c237c76fa06539efce4911fe9ff87e203c0b11051eb4f013cbafe4b5a`. Successful collection publishes a structured pickle only. A separate Z sweep at accommodation 0 D is planned later; the existing P4 Z magnification study remains relevant prior work.
+
 ## Purpose and modeling principle
 
 Describe the center-relative image pattern using the fewest dependencies needed at the measurement scale. Rotation is `theta`; P4 also varies with accommodation `A` and the separately studied axial coordinate `Z`.
@@ -105,9 +109,9 @@ Check this condition on the field region being modeled, not only at the center. 
 
 ## P1 fixed-baseline barrel plus vertical keystone
 
-P1 uses its actual real-coordinate grid at zero rotation as its empirical baseline. At the selected Z plane, its rotation calibration contains 401 rotations and nine fields per rotation. The existing analysis independently estimates three keystone parameters at each angle using algebraic initialization and damped Cartesian Gauss-Newton refinement, then fits unconstrained quadratics to the resulting parameter curves. See the [P1 transform report](data/p1_rotation_transform/report.md).
+P1 uses its actual real-coordinate grid at zero rotation as its empirical baseline. At the selected Z plane, the prior rotation calibration contained 401 rotations and nine fields per rotation. The source analysis independently estimates three keystone parameters at each angle and fits unconstrained quadratics to the resulting parameter curves. Its generated result folder has been removed after the replacement sweep validated; see `Script/analyze_p1_rotation_transform.py` to regenerate current results.
 
-**Dataset status and provenance:** The canonical P1 grid has 51 absolute `Cornea_ENT_D` THI planes from -5 to +5 mm. The P1 rotation report remains the earlier single-slice analysis, associated with a prior sequence revision and a recorded THI baseline of -35 mm; its source hash does not establish identity with the current sequence. A numerical audit found that its entire 3,609-row slice (401 rotations by nine fields) matches the current sweep's Z=0 slice to floating-point roundoff. Therefore its reported rotation fit remains numerically applicable at Z=0. It does not establish rotation behavior at the other 50 Z planes. The current sequence uses a 1 mm baseline; absolute THI Z here is the coordinate recorded by the sweep and is not relabeled as displacement from that baseline.
+**Dataset status and provenance:** The validated canonical P1 grid has 51 absolute `Cornea_ENT_D` THI planes from -5 to +5 mm. The prior P1 rotation fit came from an earlier single-slice analysis associated with a prior sequence revision and a recorded THI baseline of -35 mm; its source hash does not establish identity with the current sequence. A numerical audit found that its 3,609-row slice (401 rotations by nine fields) matches the previous multi-Z sweep Z=0 slice to floating-point roundoff. It does not validate that fit against the replacement grid or establish rotation behavior at the other Z planes. The prior fit is stale pending refresh. The current sequence uses a 1 mm baseline; absolute THI Z is the coordinate recorded by the sweep and is not relabeled as displacement from that baseline.
 
 ### Z-dependent zero-rotation barrel baseline and magnification
 
@@ -145,7 +149,7 @@ The resulting proposed composition is `p_1(theta,Z)≈m(Z) K_1(theta;b_1(0))`: a
 
 The separate per-Z radial fits use `real = paraxial * (1 + k1*r^2)` with paraxial radius in millimeters and `k1` in mm^-2. The direct quadratic summary is `k1(Z)=-0.0130398764628 + 7.68681341348e-5 Z - 1.13154451225e-7 Z^2` (coefficient units mm^-2, mm^-3, mm^-4). Since paraxial image scale also changes with Z, `k1` alone mixes scale and barrel strength. The sampled dimensionless `k1*r_edge^2` varies by only 0.00898% of its absolute mean; the edge and corner radial percentages vary by less than 0.001 percentage point. As a cross-check, `k1(Z)*m_p(Z)^2` spans 1.17e-6. The per-grid radial-model coordinate RMSE is **2.24–2.31 micrometers**, so it is a distinct and larger fit error than the roughly 0.0012-micrometer residual from the inter-Z common-scale comparison.
 
-See the [expanded P1 radial and magnification report](data/p1_radial_distortion_fit/p1_radial_distortion_fit.md), [magnification plot](data/p1_radial_distortion_fit/p1_z_magnification.png), [saved magnification data](data/p1_radial_distortion_fit/p1_z_magnification.pkl), and [analysis script](Script/fit_p1_radial_distortion.py). The five-angle check used the existing [P1 sweep pickle](data/distortion_grid/distortion_grid.pkl); no new artifact was produced.
+The values in this paragraph are historical pre-replacement P1 radial and magnification results and are stale. Their generated report, plot, and fit artifacts have been removed. Use `Script/fit_p1_radial_distortion.py` to regenerate the analysis from the validated P1 sweep.
 
 ### Existing results
 
@@ -171,7 +175,7 @@ with the units defined above. These are extracted from the unconstrained fit, no
 
 Replacing the fitted scale intercepts by one and removing the nearly zero symmetry-inconsistent terms changes the existing quadratic predictions by **0.052145 micrometers pooled coordinate RMS**, with **0.086877 micrometers maximum absolute coordinate change**. The worst per-angle coordinate RMS change is 0.052152 micrometers.
 
-These are diagnostic calculations using the nine baseline coordinates in the [P1 CSV](data/distortion_grid/distortion_grid.csv), the published physical-degree coefficients, and all 401 sampled angles. For reproducibility, evaluate both the original curves `c0+c1*theta+c2*theta^2` and the reduced functions above through the same `K_1`, then compare their predicted coordinates. No coefficient refit is involved. This comparison measures simplification error, not total error against CODE V.
+These historical diagnostic calculations used the nine baseline coordinates saved in the pre-replacement P1 transform artifact, the published physical-degree coefficients, and all 401 sampled angles. The transform artifact was removed after replacement validation, so the old calculation is not reproducible from the retained output files. It measures simplification error on the prior dataset, not total error against CODE V or the replacement sweep.
 
 ### A constant baseline is not a constant transformed pattern
 
@@ -193,7 +197,7 @@ This is a concrete missing spatial deformation, not a polynomial-order problem. 
 
 ## P4 optical-model analyses
 
-The P4 collector has already saved the full 51-accommodation by 401-rotation by nine-field sweep: 184,059 rows covering 20,451 states. See [HANDOFF.md](HANDOFF.md). Existing reported fits use two slices of that data: radial distortion at zero rotation, and rotation transforms at 0 D. A jointly calibrated reduced model has not yet been established by those reports.
+The previous P4 collector saved a 51-accommodation by 401-rotation by nine-field sweep: 184,059 rows covering 20,451 states. That data and its fits are historical and stale relative to the validated primary sweep described above; refit if needed. See [HANDOFF.md](HANDOFF.md). A jointly calibrated reduced model has not yet been established.
 
 ### Accommodation-dependent baseline
 
@@ -247,7 +251,7 @@ $$
 k(A)=p_0+p_1A+p_2A^2,
 $$
 
-with `(p0,p1,p2)=(-0.0185179003996, 0.000180197179361, 5.15785422657e-5)` and coefficient RMSE `6.0346857e-6 mm^-2`. `d,a,p0` are in mm^-2; `b` is in D^-1; `p1,p2` carry the corresponding inverse powers of D. These values and their definitions are in the [P4 radial report](data/p4_radial_distortion_fit/p4_radial_distortion_fit.md).
+The coefficient values and error statistics in this paragraph are historical results from the pre-replacement P4 radial fit and are stale. Its generated report and fit artifacts have been removed; retain `Script/fit_p4_radial_distortion.py` for refitting.
 
 Test constant and linear accommodation functions before requiring either nonlinear alternative. Retain a more complex curve only when it meaningfully improves final coordinate prediction. For a change `Delta k` at fixed paraxial coordinates, the induced baseline displacement is
 
@@ -267,7 +271,7 @@ The current P4 rotation transform uses the actual real-coordinate baseline at ze
 | Mean per-angle coordinate RMSE, micrometers | 1.20933 | 1.84800 |
 | Maximum Euclidean point error, micrometers | 10.6716 | 16.0142 |
 
-See the [P4 rotation report](data/p4_rotation_transform/report.md). The direct zero-rotation transform is identity to numerical precision, and the minimum sampled direct denominator is 0.943952.
+The numerical results in this paragraph are historical results from the pre-replacement P4 rotation fit and are stale. Its generated report and fit artifacts have been removed; retain `Script/analyze_p4_rotation_transform.py` for refitting.
 
 The dominant terms give starting values for the reduced rotation functions at 0 D:
 
@@ -279,7 +283,7 @@ $$
 
 These values are neither a refit with identity constraints nor evidence that the coefficients are accommodation-independent. The parameter-curve approximation adds noticeable error for P4, while the direct spatial family also exceeds 1 micrometer at large rotations. Those two error sources require separate checks.
 
-### Separate P4 Z-dependent magnification study
+### Historical separate P4 Z-dependent magnification study
 
 The dedicated [P4 Z magnification report](data/p4_z_magnification/p4_z_magnification.md) uses `Lens/p4_ME.len`, zoom z1, and the explicit surface selector `s"Cornea_ENT_D"`. It collects accommodations 0, 1, 2, 3, and 4 D; RC rotations -10, -5, 0, +5, and +10 degrees; 51 absolute THI values from -5 to +5 mm at 0.2 mm spacing; and nine fields per state. This is 1,275 states and 11,475 records. The active z1 THI readback after loading this LEN is 0 mm. The study applies `THI = Z` with the same sign and records both `z_distance_mm` and `z_thickness_mm`; Z is an absolute command coordinate, not a shift from another baseline.
 
@@ -343,7 +347,7 @@ $$
 
 Initially, `alpha_4`, `beta_4`, and `gamma_4` are constants with respect to accommodation. P4 still depends jointly on rotation and accommodation through its baseline and the denominator. Thus no explicit accommodation dependence in the rotation coefficients does **not** mean that the complete mapping is additive or has no interaction between the two variables.
 
-Fit or test these shared coefficients against the existing full P4 sweep; do not assume that the 0-D starting values apply unchanged at every accommodation.
+Using the validated primary sweep, fit or test these shared coefficients against its accommodation data at Z=0; do not assume that the 0-D starting values apply unchanged at every accommodation. Address Z dependence after the separate 0-D Z sweep.
 
 If the coordinate-error test requires explicit coupling, add one dependency at a time. For example,
 
@@ -405,11 +409,11 @@ Quadrature addition is not justified without suitable assumptions. Likewise, 1 m
 4. **Test reductions and additions against the same data partition.** Refit the remaining free coefficients where appropriate, then report both simplification and total errors. Include the all-constant P1 candidate only for explicitly declared restricted domains. Add individual coupling or spatial terms only when justified.
 5. **Validate the complete prediction.** Hold out rotation values and complete accommodation groups. For a compact-model held-out accommodation test, predict its baseline from the trained functions rather than reading that group's real baseline or paraxial grid. An empirical-baseline diagnostic is not end-to-end held-out validation. Inspect boundaries, per-state errors, field residuals, and denominator positivity, then check physical measurements separately.
 
-The original full P4 accommodation/rotation sweep and the separate five-angle P4 Z sweep already exist. Their LEN hashes differ, so the pair does not support joint fitting across `theta`, `A`, and `Z`; collect matched data from one lens revision before calibrating that combined model. Additional field sampling is needed only to substantiate spatial interpolation beyond the current nine fields, and further collection is needed when the optical configuration or intended domain changes. Do not claim extrapolation beyond the calibrated domain.
+The previous P4 accommodation/rotation sweep and the separate five-angle P4 Z sweep used different LEN hashes, so their old results do not support joint fitting across `theta`, `A`, and `Z`. The primary replacement sweep measures accommodation dependence at Z=0. A separate Z sweep at accommodation 0 D is planned later; collect it against the same lens revision before attempting a joint calibration. Additional field sampling is needed only to substantiate spatial interpolation beyond the current nine fields, and further collection is needed when the optical configuration or intended domain changes. Do not claim extrapolation beyond the calibrated domain.
 
 ## Current status and source artifacts
 
-**Established:** separate P1 rotation at the numerically matched Z=0 baseline, P1 zero-rotation radial and magnification summaries over Z (including a linear normalized working approximation), P4 zero-rotation radial accommodation and 0-D rotation fits, plus P4 linear Z magnification by accommodation over five tested rotations. These P4 studies have different lens hashes and remain separate. Setup-specific approximate coefficient parity and the P1 identity/parity simplification calculation above are also established. Direct P1 and P4 Z-dependence checks cover five angles each; neither establishes rotation independence over all 401 angles or a full joint calibration.
+**Historical results:** the prior P1/P4 rotation and radial fits are stale after replacement data collection, and their generated outputs have been removed. The separate P4 Z magnification results remain as relevant prior work on their recorded lens revision; they do not validate the new P4 accommodation sweep. The P1 and P4 Z-dependence checks cover five angles each and do not establish rotation independence over all 401 angles.
 
 **Proposed for fitting and validation:** the compact P4 baseline scale function, shared rotation coefficients across accommodation, a jointly calibrated reduced transformation, and any restricted-domain constant approximation. No new joint-fit or hardware-precision result is claimed here.
 
@@ -417,7 +421,7 @@ The working recommendation is the P1 Z=0 measured real baseline transformed by t
 
 Source artifacts:
 
-- [P1 raw CSV](data/distortion_grid/distortion_grid.csv), [P1 transform report](data/p1_rotation_transform/report.md), [P1 radial/magnification report](data/p1_radial_distortion_fit/p1_radial_distortion_fit.md), and [P1 runners](Script/analyze_p1_rotation_transform.py), [radial/magnification analysis](Script/fit_p1_radial_distortion.py).
-- [Original P4 accommodation/rotation metadata](data/distortion_grid_p4/metadata.json), [P4 radial report](data/p4_radial_distortion_fit/p4_radial_distortion_fit.md), and [P4 rotation report](data/p4_rotation_transform/report.md).
+- [Validated P1 sweep pickle](data/distortion_grid/distortion_grid.pkl) and retained analysis scripts: [P1 rotation](Script/analyze_p1_rotation_transform.py), [P1 radial/magnification](Script/fit_p1_radial_distortion.py).
+- [Validated P4 sweep pickle](data/distortion_grid_p4/distortion_grid.pkl) and retained analysis scripts: [P4 radial fit](Script/fit_p4_radial_distortion.py), [P4 rotation transform](Script/analyze_p4_rotation_transform.py).
 - [Separate P4 Z magnification report](data/p4_z_magnification/p4_z_magnification.md), [plot](data/p4_z_magnification/p4_z_magnification.png), [structured grid](data/p4_z_magnification/p4_z_magnification.pkl), [metadata](data/p4_z_magnification/metadata.json), [fit artifact](data/p4_z_magnification/p4_z_magnification_fit.pkl), and [script](Script/analyze_p4_z_magnification.py). This dataset's LEN SHA-256 is `fb3937e6763f27e331faa10a4863533e994030cbc0ae74364b186ba0d06d474d`; the original P4 dataset hash is `5e0715c70016fbcec8a49956dd2ec824a50f5c4c52ca472b0225a2523db614ac`.
 - [HANDOFF.md](HANDOFF.md) for collection provenance and environment requirements; [Summary.md](Summary.md) for the existing fit summaries.

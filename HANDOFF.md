@@ -1,83 +1,124 @@
-# Distortion model handoff
+﻿# Distortion model results
 
-## Project goal
+## Scope and conventions
 
-Identify the baseline barrel distortion and the eye-rotation-dependent transformation for the P1 and P4 optical setups. P1 uses its measured real-coordinate grid at zero rotation as the empirical barrel-distorted source and fits a vertical-keystone transform across rotation. P4 fits radial `k1` across accommodation at zero rotation, plus a separate baseline-plus-keystone transform across rotation at 0 D. These fits are setup-specific and are not a jointly calibrated model.
+The current P4 calibration covers accommodation $A=0,0.1,\ldots,5\,\mathrm{D}$, eye rotation $\theta=-20,-19.9,\ldots,20^\circ$, and $Z=0$. Each accommodation/rotation state has nine normalized field locations on a $3\times3$ grid. Paraxial and real image coordinates are in millimeters; reported residuals are in micrometers. The results below describe in-sample simulated coordinates over this sampled domain. The $1\,\mu\mathrm{m}$ value is a reference line, not a precision or accuracy claim.
 
-## Core files
+For a state with nine field points, coordinate RMSE is
 
-- `Lens/p1_ME.seq`, `Lens/p4_ME.len`, and related lens source files: optical models; preserve their current settings.
-- `Script/distortion_grid.py` and `Script/distortion_grid_p4.py`: CODE V sweep collectors.
-- `Script/plot_distortion_grid.py` and `Script/plot_distortion_grid_p4.py`: plots from saved structured pickles without CODE V.
-- `Script/analyze_p1_rotation_transform.py` and `Script/analyze_p4_rotation_transform.py`: baseline-plus-keystone fits.
-- `Script/fit_p4_radial_distortion.py`: radial `k1` and accommodation-curve fits for P4.
-- `Script/raytracing.py`: COM/ray-tracing reference and explicit RC selector.
-- `Script/codev_startup_check.py`: optional CODE V startup check.
-- `Theory.md` and `Summary.md`: model definitions, results, and limitations.
+$$
+\operatorname{RMSE}=\sqrt{\frac{1}{18}\sum_{i=1}^{9}\left[(\Delta x_i)^2+(\Delta y_i)^2\right]},
+$$
 
-## Python environment
+and maximum point error is the largest of the nine Euclidean errors $\sqrt{(\Delta x_i)^2+(\Delta y_i)^2}$. “Mean RMSE” below is the arithmetic mean of state RMSE values, not a pooled residual RMSE.
 
-Use this interpreter by its absolute path for every Python script, module, install, or check command:
+## Zero-rotation barrel baseline
 
-```powershell
-$distortionPython = 'C:\Users\rueijrwu\.pyenv-win-venv\envs\venv\Scripts\python.exe'
-& $distortionPython --version
-```
+At each accommodation, let $\mathbf u_i(A)=(u_{ix},u_{iy})$ be the actual paraxial reference coordinate for field $i$, and let $r_i^2=\mathbf u_i\cdot\mathbf u_i$. The signed radial model is
 
-Required packages are NumPy and Matplotlib; collecting from CODE V also requires `pywin32`. Use CODE V only for collection. The plotting and fitting scripts consume saved data and do not start CODE V.
+$$
+\widehat{\mathbf b}_i(A)=\left[1+k_1(A)r_i^2\right]\mathbf u_i(A),
+$$
 
-## P1 grid and rotation transform
+where $k_1$ has units $\mathrm{mm}^{-2}$. Negative $k_1$ gives barrel distortion. The paraxial magnification is approximately isotropic; this is separate from the radial real-grid fit residuals reported below.
 
-The canonical P1 sweep is `data\distortion_grid\distortion_grid.pkl`; its CSV export is retained at `data\distortion_grid\distortion_grid.csv`. The sweep has 51 absolute THI values from +5 to -5 mm, 401 RC rotations from -20° to +20° in 0.1° increments at each THI, and nine fields per state (184,059 rows total). The structured data includes `z_mm`. Plotting defaults to five rotation panels at -10°, -5°, 0°, +5°, and +10°, overlaying the exact stored z planes -5, -2.6, 0, +2.6, and +5 mm in each panel. Colors distinguish z planes; dashed and solid lines distinguish paraxial reference and real image grids. Use `--rotations` and `--z-values` to select other exact stored values. No CODE V trace is performed by the plotter. Recreate the default comparison with:
+An in-sample quadratic accommodation description is
 
-```powershell
-& $distortionPython -u Script\plot_distortion_grid.py
-```
+$$
+k_1(A)=p_0+p_1A+p_2A^2,
+$$
 
-The P1 rotation fit uses the actual real-coordinate grid at theta=0 as its fixed source, so its sampled baseline barrel distortion carries into each prediction. The existing P1 fit outputs were generated from the previous single-z dataset, whose lens-sequence revision had `Cornea_ENT_D` THI at -35 mm; the current user-edited sequence has a 1 mm baseline. The old fit outputs are stale relative to the current multi-z sweep; rerun only when new fit results are requested. The runner defaults to z=0 and accepts `--z-mm` to fit another slice. To recreate its report, pickle, coefficient artifact, and plots:
+with $(p_0,p_1,p_2)=(-0.0185179003996,\,0.000180197179361,\,5.15785422657\times10^{-5})$; coefficient units are respectively $\mathrm{mm}^{-2}$, $\mathrm{mm}^{-2}\mathrm{D}^{-1}$, and $\mathrm{mm}^{-2}\mathrm{D}^{-2}$. A fitted signed offset exponential is also an empirical alternative:
 
-```powershell
-& $distortionPython -u Script\analyze_p1_rotation_transform.py
-```
+$$
+k_1(A)=d+a e^{bA},\qquad(d,a,b)=(-0.0195347321301,\,0.000993232198585,\,0.235926475525\,\mathrm{D}^{-1}),
+$$
 
-The outputs are in `data\p1_rotation_transform\`. The fitted mapping is `X=sx*x0/(1+q*y0)`, `Y=sy*y0/(1+q*y0)`; its residual includes optical effects outside this reduced model.
+where $d,a$ are in $\mathrm{mm}^{-2}$. Since $k_1$ is negative, no logarithm of $k_1$ is used.
 
-## P1 CODE V collection
+The coefficient becomes less negative from $-0.0185283312073\,\mathrm{mm}^{-2}$ at $0\,\mathrm{D}$ to $-0.0163117998622\,\mathrm{mm}^{-2}$ at $5\,\mathrm{D}$. Both accommodation terms matter: at $5\,\mathrm{D}$, the linear and quadratic contributions are about $0.000901$ and $0.001289\,\mathrm{mm}^{-2}$. The paraxial reference also changes with accommodation: its measured isotropic scale relative to $0\,\mathrm{D}$ is $0.896199673581$ at $5\,\mathrm{D}$. This is distinct from the radial coefficient; no continuous law for the paraxial scale has been fitted.
 
-The target is `Lens\p1_ME.seq`. Keep the existing `SRC_ROT ADE -20` setting unless requested otherwise. Apply eye rotation through `ADE` on surface `RC` with the exact selector `S_RC = "s\"RC\""` from `raytracing.py`. The collector applies absolute THI values through `S_CORNEA_MOV = "s\"Cornea_ENT_D\""`, verifies both ADE and THI readbacks, and cleans up with `StopCodeV()` and `pythoncom.CoUninitialize()`. It checkpoints only complete z groups, validates resume against the sweep configuration and lens SHA-256, and replaces the canonical pickle only after the full sweep completes.
+Direct per-accommodation barrel fits have mean state RMSE $0.807812\,\mu\mathrm{m}$, maximum state RMSE $1.101915\,\mu\mathrm{m}$, and maximum point error $2.203830\,\mu\mathrm{m}$. Replacing direct $k_1$ values with the quadratic curve adds at most $0.0366545\,\mu\mathrm{m}$ coordinate RMSE; the exponential adds at most $0.0428462\,\mu\mathrm{m}$. These are sampled-field, in-sample results.
 
-To recollect the default P1 sweep:
+## Rotation-dependent keystone
 
-```powershell
-& $distortionPython -u Script\distortion_grid.py
-```
+For each accommodation, the input is its measured real grid at $\theta=0$, denoted $\mathbf b_i(A)=(x_{0i},y_{0i})$. It already contains the zero-angle barrel distortion, so applying the radial model again would double-count it. The fitted transformation is
 
-## P4 accommodation grid, radial fit, and rotation transform
+$$
+X=\frac{s_x x_0}{1+qy_0},\qquad
+Y=\frac{s_y y_0}{1+qy_0},\qquad
+H=\begin{bmatrix}
+s_x&0&0\\
+0&s_y&0\\
+0&q&1
+\end{bmatrix}.
+$$
 
-### P4 accommodation distortion grid
+Here $s_x,s_y$ are dimensionless and $q$ has units $\mathrm{mm}^{-1}$. At each accommodation, each of the three directly fitted parameters is then represented by an unconstrained quadratic in rotation. In compact form,
 
-`Script\distortion_grid_p4.py` collects the P4 model over both accommodation and RC eye rotation. It loads `Lens\p4_ME.len` with CODE V `RES`, targets zoom `z1` (P4), and leaves the second zoom (ME) out of the sweep. The default is 51 accommodation values from 0 to 5 D in 0.1 D steps, 401 RC rotations from -20° to +20° in 0.1° steps, and a 3 × 3 field grid. The completed sweep contains 184,059 rows (9 grid points for each accommodation/rotation state) in `data\distortion_grid_p4\distortion_grid.pkl`. Its metadata in `metadata.json` records the lens hash, settings, baselines, and completed groups. After each accommodation group, the collector writes the pickle and metadata through separate atomic file replacements; the pair is not replaced as one transaction. Resume validates both files against the requested sweep and lens hash before continuing.
+$$
+\begin{bmatrix}s_x(\theta,A)&s_y(\theta,A)&q(\theta,A)\end{bmatrix}
+=
+\begin{bmatrix}1&\theta&\theta^2\end{bmatrix}C(A),
+\qquad
+C(A)=
+\begin{bmatrix}
+c_{0x}&c_{0y}&c_{0q}\\
+c_{1x}&c_{1y}&c_{1q}\\
+c_{2x}&c_{2y}&c_{2q}
+\end{bmatrix}.
+$$
 
-Accommodation geometry follows `Script\raytracing.py`: the z1 `CorneaB` and `LensF` thicknesses, `LensF` and `LensB` radii and conics, and GRIN coefficients are set from the pristine lens baseline for each accommodation value. The collector checks geometry readbacks, uses the explicit RC selector `s\"RC\"` and verifies each requested ADE, then traces the same relative 3 × 3 grid. It appends `accommodation_d` to the existing structured grid fields.
+Rows of $C(A)$ correspond to basis terms $1,\theta,\theta^2$ and columns to parameters $s_x,s_y,q$. Each accommodation has its own fitted matrix; no accommodation polynomial for its entries has been fit. The dominant measured terms in physical-degree units are:
 
-The completed collection verified all 20,451 accommodation/rotation states, with nine distinct points per state and all ten numeric fields finite. It includes the center, four corners, and four edge-midpoint fields. CODE V verified the requested RC ADE readback at each rotation. The saved lens SHA-256 is recorded in the metadata alongside all 51 completed accommodation groups.
+| $A$ (D) | $s_x$ coefficient of $\theta^2$ ($\mathrm{degree}^{-2}$) | $s_y$ coefficient of $\theta^2$ ($\mathrm{degree}^{-2}$) | $q$ coefficient of $\theta$ ($\mathrm{mm}^{-1}\,\mathrm{degree}^{-1}$) |
+|---:|---:|---:|---:|
+| 0 | 0.0001552758954 | 0.0003028028193 | -0.002345622877 |
+| 1 | 0.0001732684773 | 0.0003630345936 | -0.002831577821 |
+| 2 | 0.0001918100541 | 0.0004266453010 | -0.003355193078 |
+| 3 | 0.0002108883579 | 0.0004936398101 | -0.003918254684 |
+| 4 | 0.0002305306594 | 0.0005642392799 | -0.004524126537 |
+| 5 | 0.0002507548114 | 0.0006386357893 | -0.005175941610 |
 
-```powershell
-& $distortionPython -u Script\plot_distortion_grid_p4.py --accommodation 0
-```
+A reduced interpretation is
 
-The default plot is one row of five panels at RC -10°, -5°, 0°, +5°, and +10°. Each panel overlays accommodation 0, 2, and 4 D in distinct colors, with dashed reference grids and solid real image grids. All panels share image-coordinate bounds and equal aspect. It is saved as `data\distortion_grid_p4\distortion_grid.png`. Choose another set of D values with `--accommodations`, or one value with `--accommodation`; selected rotations and output path can be set with `--rotations` and `--output`. If a run stops after one or more accommodation groups, continue with the same sweep settings using `--resume`; the checkpoint's model hash and configuration are checked before it continues.
+$$
+s_x\approx c_x(A)+\alpha(A)\theta^2,\qquad
+s_y\approx c_y(A)+\beta(A)\theta^2,\qquad
+q\approx\gamma(A)\theta.
+$$
 
-Fit the P4 radial coefficient across accommodation and regenerate its report and plots with:
+The scale intercepts $c_x,c_y$ are near one, but are not fixed to one. Direct fits at zero rotation are numerically near $(1,1,0)$; the subsequent quadratics do not enforce that identity or even/odd symmetry. Omitted scale-linear and $q$-quadratic terms are numerically negligible in these fits. These observed dominant orders do not establish that higher-order terms are unnecessary. The rotation and keystone coefficients vary materially with accommodation.
 
-```powershell
-& $distortionPython -u Script\fit_p4_radial_distortion.py
-```
+| Fit summary over accommodation and rotation states | Mean | Maximum |
+|---|---:|---:|
+| Direct-transform coordinate RMSE ($\mu\mathrm{m}$) | 4.06167 | 12.8112 |
+| Quadratic-parameter total coordinate RMSE ($\mu\mathrm{m}$) | 4.46151 | 14.5312 |
+| Added error from parameter quadratics, coordinate RMSE ($\mu\mathrm{m}$) | 1.51779 | 7.25432 |
+| Direct-transform maximum point error ($\mu\mathrm{m}$) | 7.60316 | 25.104 |
+| Quadratic-parameter total maximum point error ($\mu\mathrm{m}$) | 8.38888 | 25.7348 |
+| Added error from parameter quadratics, maximum point error ($\mu\mathrm{m}$) | 3.06876 | 14.5049 |
 
-Fit the P4 baseline-plus-keystone transform at 0 D across rotation with:
+The barrel and keystone errors cover different scopes: barrel is evaluated at zero rotation against paraxial coordinates, while keystone covers the rotation range relative to each accommodation's measured zero-angle real grid. They are not a controlled head-to-head comparison. Reusing the $0\,\mathrm{D}$ keystone parameters at other accommodations produces a maximum pointwise prediction difference of $294.802\,\mu\mathrm{m}$ relative to the accommodation-specific direct fit; the resulting maximum point error against measurements is $296.617\,\mu\mathrm{m}$. Accommodation dependence is essential.
 
-```powershell
-& $distortionPython -u Script\analyze_p4_rotation_transform.py
-```
+The largest direct keystone residual occurs at $A=5\,\mathrm{D}$, $\theta=-20^\circ$, field $(1,0)$, with predicted-minus-measured residual about $(+7.884,+23.834)\,\mu\mathrm{m}$. There $y_0$ is near zero, so this projective form predicts $Y$ near zero despite the measured vertical shift. A missing spatial component is implicated; raising only the rotation-polynomial order cannot represent that residual.
 
-The P1 collector needs Windows, CODE V, a working license, and `pywin32`; its default output is `data\distortion_grid\distortion_grid.pkl`. The P4 collector uses the separate `data\distortion_grid_p4\distortion_grid.pkl` output path. All script paths otherwise resolve relative to the project.
+The measured absolute image center is a separate observable. Its same-accommodation change from zero rotation reaches $5.52214\,\mathrm{mm}$ in one component. No continuous center law is established.
+
+## Candidate composition and limits
+
+A possible absolute-coordinate model is
+
+$$
+\widehat{\mathbf p}_{\mathrm{abs},i}(\theta,A)
+=
+\mathbf c_{\mathrm{abs}}(\theta,A)
++
+K_{\theta,A}\!\left(\widehat{\mathbf b}_i(A)\right),
+$$
+
+where $K$ is the keystone transform above. This composition has not been validated end to end: reported keystone errors use the measured baseline $\mathbf b_i(A)$, not the fitted $\widehat{\mathbf b}_i(A)$, and the center term has no fitted law. A possible continuous accommodation description of the keystone coefficient matrix is $C(A)=C_0+C_1A$, with a quadratic term considered only if composed Cartesian errors warrant it; this is a proposal, not a fitted result. The accommodation dependence of paraxial scale likewise remains without a fitted law.
+
+A separate limited $Z$ study found an approximately linear scale $m_Z\approx1+0.00295Z$, where $Z$ is in millimeters and the slope has units $\mathrm{mm}^{-1}$. It sampled only $A=0,1,2,3,4\,\mathrm{D}$ and five rotations from $-10^\circ$ to $+10^\circ$. Its worst linear-model state had coordinate RMSE $0.249\,\mu\mathrm{m}$ and maximum point error $0.511\,\mu\mathrm{m}$. It does not establish a joint accommodation/rotation/$Z$ model over the full P4 rotation domain or whether the scale transformations commute.
+
+Current P1 fit results are not established for the current P1 data. An eventual eye-rotation inference using the center and four corners, with $1\,\mu\mathrm{m}$ Gaussian measurement noise, has not been evaluated; the residual metrics above use all nine field points. The remaining scientific questions are how to represent the observed spatial residuals, how many rotation terms are useful, what accommodation dependence is needed for keystone coefficients and paraxial scale, and how the barrel, keystone, and center components perform together in Cartesian coordinates.

@@ -1,12 +1,14 @@
-"""Fit baseline-barrel plus vertical keystone transforms across P4 eye rotation.
+"""Analyze P4 empirical theta-zero barrel baselines and reduced keystone maps.
 
-The fixed source is the measured real A=0 grid at theta=0. This script never
-starts CODE V and fits one direct three-parameter transform at each angle.
+For each accommodation, the measured real grid at theta=0 is the source grid.
+The script fits a three-parameter vertical-keystone transform to each rotation,
+then characterizes the theta dependence with independent quadratics.
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import pickle
 from pathlib import Path
 
@@ -26,13 +28,13 @@ PARAMETER_UNITS = ("unitless", "unitless", "mm^-1")
 
 
 def predict(parameters: np.ndarray, source: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Apply X=sx*x/(1+q*y), Y=sy*y/(1+q*y) to a batch of grids."""
     sx, sy, q = (parameters[:, i, None] for i in range(3))
     x, y = source[:, :, 0], source[:, :, 1]
     denominator = 1.0 + q * y
     if np.any(denominator <= 0) or not np.isfinite(denominator).all():
         raise ValueError("Vertical keystone has a nonpositive/nonfinite sampled denominator")
-    projected = np.stack((sx * x / denominator, sy * y / denominator), axis=2)
-    return projected, denominator
+    return np.stack((sx * x / denominator, sy * y / denominator), axis=2), denominator
 
 
 def residual_jacobian(parameters: np.ndarray, source: np.ndarray,
@@ -44,15 +46,16 @@ def residual_jacobian(parameters: np.ndarray, source: np.ndarray,
     jx = np.stack((x / d, np.zeros_like(x), -sx * x * y / d**2), axis=2)
     jy = np.stack((np.zeros_like(y), y / d, -sy * y**2 / d**2), axis=2)
     jacobian = np.stack((jx, jy), axis=2).reshape(len(source), 18, 3)
-    residual = (prediction - target).reshape(len(source), 18)
-    return residual, jacobian
+    return (prediction - target).reshape(len(source), 18), jacobian
 
 
 def fit_batched(source: np.ndarray, target: np.ndarray) -> tuple[np.ndarray, dict]:
-    """Batched algebraic initializer and damped Cartesian Gauss-Newton refinement."""
+    """Batched algebraic initializer and damped Cartesian Gauss-Newton fit.
+
+    API retained for analyze_p1_rotation_transform.py.
+    """
     x, y = source[:, :, 0], source[:, :, 1]
     X, Y = target[:, :, 0], target[:, :, 1]
-    # Rearrange X=sx*x/(1+q*y), Y=sy*y/(1+q*y) into linear least squares.
     design_x = np.stack((x, np.zeros_like(x), -X * y), axis=2)
     design_y = np.stack((np.zeros_like(y), y, -Y * y), axis=2)
     design = np.stack((design_x, design_y), axis=2).reshape(len(source), 18, 3)
@@ -111,100 +114,236 @@ def fit_batched(source: np.ndarray, target: np.ndarray) -> tuple[np.ndarray, dic
 
 
 def fit_quadratic(values: np.ndarray, theta: np.ndarray) -> tuple[np.ndarray, np.ndarray, dict]:
-    """Fit independent ordinary quadratics against t=theta/20 over all angles."""
-    scaled_theta = theta / 20.0
-    design = np.column_stack((np.ones_like(theta), scaled_theta, scaled_theta**2))
+    """Fit independent ordinary quadratics using t=theta/20; P1-compatible API."""
+    design = np.column_stack((np.ones_like(theta), theta / 20.0, (theta / 20.0) ** 2))
     coefficients, _, rank, singular = np.linalg.lstsq(design, values, rcond=None)
     fitted = design @ coefficients
     residual = fitted - values
-    metrics = {
+    return coefficients, fitted, {
         "rank": int(rank),
         "condition_number": float(singular[0] / singular[-1]),
         "rmse_by_parameter": np.sqrt(np.mean(residual**2, axis=0)),
         "max_abs_by_parameter": np.max(np.abs(residual), axis=0),
     }
-    return coefficients, fitted, metrics
 
 
-def make_plots(theta: np.ndarray, parameters: np.ndarray, quadratic: np.ndarray,
-               coordinate_rmse: np.ndarray, quadratic_rmse: np.ndarray, output: Path) -> None:
-    fig, axes = plt.subplots(1, 3, figsize=(15, 4.8), constrained_layout=True)
-    for i, axis in enumerate(axes):
-        axis.plot(theta, parameters[:, i], color="tab:blue", linewidth=1.5)
-        axis.plot(theta, quadratic[:, i], color="tab:orange", linestyle="--", linewidth=1.3)
-        axis.set_title(f"{PARAMETER_NAMES[i]} ({PARAMETER_UNITS[i]})")
-        axis.set_xlabel("Eye rotation, theta (degrees)")
-        axis.grid(True, alpha=0.25)
-    fig.suptitle("Baseline barrel map plus vertical keystone, accommodation 0 D")
-    axes[0].legend(("direct per-angle fit", "quadratic coefficient fit"), fontsize=8)
-    fig.savefig(output / "keystone_coefficients.png", dpi=180)
+def spatial_metrics(prediction: np.ndarray, truth: np.ndarray) -> dict:
+    residual = prediction - truth
+    points = np.linalg.norm(residual, axis=-1)
+    return {
+        "residual_xy_mm": residual,
+        "coordinate_rmse_mm": np.sqrt(np.mean(residual**2, axis=(-2, -1))),
+        "maximum_absolute_coordinate_error_mm": np.max(np.abs(residual), axis=(-2, -1)),
+        "point_euclidean_error_mm": points,
+        "rms_euclidean_point_error_mm": np.sqrt(np.mean(points**2, axis=-1)),
+        "maximum_euclidean_point_error_mm": np.max(points, axis=-1),
+    }
+
+
+def make_plots(theta: np.ndarray, accommodation: np.ndarray, direct: np.ndarray,
+               quadratic: np.ndarray, physical_coeff: np.ndarray,
+               metrics: dict, accommodation_metrics: dict,
+               center_abs: np.ndarray, center_relative: np.ndarray, output: Path) -> None:
+    colors = plt.cm.viridis(np.linspace(0, 1, len(accommodation)))
+    fig, axes = plt.subplots(1, 3, figsize=(16, 5), constrained_layout=True)
+    for j, ax in enumerate(axes):
+        for ai, a in enumerate(accommodation):
+            ax.plot(theta, direct[ai, :, j], color=colors[ai], lw=1.0, alpha=0.8)
+        for ai in (0, 10, 20, 30, 40, 50):
+            ax.plot(theta, quadratic[ai, :, j], "--", color=colors[ai], lw=1.6,
+                    label=f"A={accommodation[ai]:g} D quadratic")
+        ax.set_title(f"{PARAMETER_NAMES[j]} ({PARAMETER_UNITS[j]})")
+        ax.set_xlabel("Eye rotation, theta (degrees)")
+        ax.grid(True, alpha=0.25)
+    axes[0].legend(fontsize=7, ncol=2)
+    fig.suptitle("P4 per-accommodation empirical-baseline keystone coefficients")
+    fig.savefig(output / "keystone_coefficients_by_accommodation.png", dpi=180)
     plt.close(fig)
 
-    fig, axis = plt.subplots(figsize=(10, 5.5), constrained_layout=True)
-    axis.plot(theta, coordinate_rmse * 1000.0, color="tab:blue", linewidth=1.5)
-    axis.plot(theta, quadratic_rmse * 1000.0, color="tab:orange", linestyle="--", linewidth=1.3)
-    axis.legend(("direct fit", "quadratic-composed prediction"), fontsize=8)
-    axis.set_xlabel("Eye rotation, theta (degrees)")
-    axis.set_ylabel("Coordinate RMSE over 9 points and x/y (µm)")
-    axis.set_title("Single composed-model residual, accommodation 0 D")
-    axis.grid(True, alpha=0.25)
-    fig.savefig(output / "coordinate_rmse.png", dpi=180)
-    plt.close(fig)
-
-
-def write_report(output: Path, theta: np.ndarray, parameters: np.ndarray,
-                 quadratic_coefficients_physical: np.ndarray,
-                 coefficient_rmse: np.ndarray, coefficient_max: np.ndarray,
-                 coordinate_rmse: np.ndarray, max_coordinate_error: np.ndarray,
-                 point_rms_error: np.ndarray, max_point_error: np.ndarray,
-                 quadratic_coordinate_rmse: np.ndarray,
-                 quadratic_point_rms_error: np.ndarray,
-                 quadratic_max_point_error: np.ndarray,
-                 max_point_field: np.ndarray, diagnostics: dict) -> None:
-    zero_idx = int(np.argmin(np.abs(theta)))
-    lines = [
-        "# P4 composed baseline barrel and vertical keystone at 0 D", "",
-        "The analysis selects accommodation with `isclose(0, rtol=0, atol=1e-8)` and matches all 401 rotations to theta=0 by `(field_x_relative, field_y_relative)`.", "",
-        "## Composition and model", "",
-        "The fixed source points are the actual simulated **real** coordinates at accommodation 0 D and theta=0. Those nine coordinates and their paraxial baseline coordinates are saved in the pickle. This preserves the measured baseline barrel distortion exactly at the sampled points; each rotation's paraxial coordinates are not used as the transform source.", "",
-        "The only rotation-dependent mapping is reduced vertical keystone: `X=sx*x0/(1+q*y0)`, `Y=sy*y0/(1+q*y0)`, with homography `[[sx,0,0],[0,sy,0],[0,q,1]]`. Center-relative coordinates set translations to zero; symmetry excludes shear and horizontal perspective. The shared denominator changes horizontal width with y as well as vertical position. `sx` and `sy` are dimensionless; `q` is mm^-1.", "",
-        "A batched algebraic least-squares estimate initializes a damped Gauss-Newton refinement against Cartesian squared reprojection error. All 401 fits are processed together. The theta=0 baseline-to-itself coefficients are fitted from data, not assigned by hand; sampled denominators must remain positive.", "",
-        "## Coefficient dependence", "",
-        "The blue curve is the independently fitted coefficient at each rotation. The dashed curve is a separate unconstrained ordinary least-squares quadratic fitted to all 401 direct coefficients (all ground-truth angles, in-sample). Its internal basis is `[1,t,t²]` with `t=theta/20`; the report table converts this to `c(theta)=c0+c1*theta+c2*theta²`. No symmetry constraints or held-out angles are used, and the fit does not force the theta=0 intercept to identity.", "",
-        "| Parameter | Units | Constant c0 | Linear c1 (per degree) | Quadratic c2 (per degree²) | Coefficient RMSE | Coefficient max error |",
-        "|---|---|---:|---:|---:|---:|---:|",
-    ]
+    fig, axes = plt.subplots(3, 3, figsize=(15, 10), constrained_layout=True)
+    basis_names = ("constant", "linear in theta (degree⁻¹)", "quadratic in theta (degree⁻²)")
     for j, name in enumerate(PARAMETER_NAMES):
-        lines.append(f"| {name} | {PARAMETER_UNITS[j]} | {quadratic_coefficients_physical[0,j]:.12g} | "
-                     f"{quadratic_coefficients_physical[1,j]:.12g} | {quadratic_coefficients_physical[2,j]:.12g} | "
-                     f"{coefficient_rmse[j]:.8g} | {coefficient_max[j]:.8g} |")
-    lines.extend(["", "The reported coefficient order is `(sx, sy, q)`. Coefficient-fit RMSE and maximum error use each parameter's base units. Units are unitless for sx/sy and mm^-1 for q; c1 and c2 carry the corresponding per-degree and per-degree-squared factors. The coefficients are stored both in the scaled basis and in physical-degree form.", "",
-                  "## Per-angle spatial errors", "",
-                  "Coordinate RMSE is `sqrt(mean(rx², ry²))` over nine points and both coordinates (18 scalar residuals). RMS Euclidean point error is `sqrt(mean(rx²+ry²))` over the nine points. Maximum Euclidean point error is the largest `sqrt(rx²+ry²)` among the nine points. Direct-fit columns come from each independent transform; quadratic columns evaluate the quadratic coefficient transform against the same actual grid.", "",
-                  "| theta (degrees) | Direct coordinate RMSE (µm) | Quadratic coordinate RMSE (µm) | Direct RMS point (µm) | Quadratic RMS point (µm) | Direct max point (µm) | Quadratic max point (µm) |",
-                  "|---:|---:|---:|---:|---:|---:|---:|"])
-    samples = [int(np.argmin(np.abs(theta - angle))) for angle in (-20, -15, -10, -5, 0, 5, 10, 15, 20)]
-    for i in samples:
-        lines.append(f"| {theta[i]:g} | {coordinate_rmse[i]*1000:.6g} | {quadratic_coordinate_rmse[i]*1000:.6g} | "
-                     f"{point_rms_error[i]*1000:.6g} | {quadratic_point_rms_error[i]*1000:.6g} | "
-                     f"{max_point_error[i]*1000:.6g} | {quadratic_max_point_error[i]*1000:.6g} |")
-    lines.extend(["", f"At theta=0, the direct baseline-to-itself fit gives `sx={parameters[zero_idx,0]:.12g}`, `sy={parameters[zero_idx,1]:.12g}`, `q={parameters[zero_idx,2]:.12g} mm^-1`; these values were estimated rather than forced. The quadratic intercept is reported in the coefficient table without being constrained to these values.", "",
-                  "## Residual definitions and fit accuracy", "",
-                  "Coordinate RMSE is `sqrt(mean(rx², ry²))` over nine points and both coordinates (18 scalar residuals). RMS Euclidean point error is `sqrt(mean(rx²+ry²))` over the nine points. Maximum Euclidean point error is the largest `sqrt(rx²+ry²)` among the nine points.", "",
-                  f"Coordinate RMSE is {coordinate_rmse.min()*1000:.6g}–{coordinate_rmse.max()*1000:.6g} µm (mean {coordinate_rmse.mean()*1000:.6g} µm).",
-                  f"RMS Euclidean point error is {point_rms_error.min()*1000:.6g}–{point_rms_error.max()*1000:.6g} µm (mean {point_rms_error.mean()*1000:.6g} µm).",
-                  f"Maximum Euclidean point error is {max_point_error.min()*1000:.6g}–{max_point_error.max()*1000:.6g} µm.",
-                  f"Quadratic-composed coordinate RMSE is {quadratic_coordinate_rmse.min()*1000:.6g}–{quadratic_coordinate_rmse.max()*1000:.6g} µm (mean {quadratic_coordinate_rmse.mean()*1000:.6g} µm).",
-                  f"Quadratic-composed maximum Euclidean point error is {quadratic_max_point_error.min()*1000:.6g}–{quadratic_max_point_error.max()*1000:.6g} µm.",
-                  f"Largest point residual: {max_point_error.max()*1000:.6g} µm at theta={theta[np.argmax(max_point_error)]:g}°, field ({max_point_field[np.argmax(max_point_error),0]:g}, {max_point_field[np.argmax(max_point_error),1]:g}).",
-                  f"Batched algebraic initializer rank is 3 at every angle; condition number range {diagnostics['initializer_condition_number'].min():.6g}–{diagnostics['initializer_condition_number'].max():.6g}.",
-                  f"All nonlinear fits converged: {bool(np.all(diagnostics['converged']))}; accepted damped steps range {diagnostics['accepted_refinement_steps'].min()}–{diagnostics['accepted_refinement_steps'].max()}.",
-                  f"Minimum fitted denominator across sampled points: {diagnostics['minimum_denominator_by_theta'].min():.8g}.", "",
-                  "## Artifacts", "",
-                  "- `p4_rotation_transform.pkl`: baseline grids, direct and quadratic coefficient series, restricted homographies, predictions, residuals, errors, and solver diagnostics.",
-                  "- `coefficient_quadratics.pkl`: scaled and physical-degree coefficient fits, basis/order/units, and curve errors.",
-                  "- `keystone_coefficients.png`: direct `sx`, `sy`, and `q` dependence plus quadratic coefficient curves.",
-                  "- `coordinate_rmse.png`: direct and quadratic-composed coordinate RMSE over the sweep.", ""])
+        for k, basis_name in enumerate(basis_names):
+            ax = axes[j, k]
+            ax.plot(accommodation, physical_coeff[:, k, j], marker=".", ms=3)
+            ax.set_title(f"{name} {basis_name}\n({PARAMETER_UNITS[j]})")
+            ax.set_xlabel("Accommodation (D)")
+            ax.grid(True, alpha=0.25)
+    fig.suptitle("Physical-degree theta-quadratic coefficients by parameter and basis")
+    fig.savefig(output / "physical_quadratic_coefficients_vs_accommodation.png", dpi=180)
+    plt.close(fig)
+
+    for name, values in (("direct_fit_error", metrics["direct"]["maximum_euclidean_point_error_mm"]),
+                         ("polynomial_total_error", metrics["polynomial"]["maximum_euclidean_point_error_mm"]),
+                         ("polynomial_additional_error", metrics["quadratic_vs_direct"]["maximum_euclidean_point_error_mm"]),
+                         ("ignored_accommodation_additional_error", accommodation_metrics["additional"]["maximum_euclidean_point_error_mm"]),
+                         ("ignored_accommodation_total_error", accommodation_metrics["total"]["maximum_euclidean_point_error_mm"])):
+        fig, ax = plt.subplots(figsize=(11, 6), constrained_layout=True)
+        mesh = ax.pcolormesh(theta, accommodation, values * 1000.0, shading="nearest", cmap="magma")
+        cb = fig.colorbar(mesh, ax=ax)
+        cb.set_label("Maximum Euclidean point error (µm)")
+        ax.contour(theta, accommodation, values * 1000.0, levels=[1.0], colors="cyan", linewidths=1.4)
+        ax.set_xlabel("Eye rotation, theta (degrees)")
+        ax.set_ylabel("Accommodation (D)")
+        ax.set_title(name.replace("_", " ").title() + " (cyan contour = 1 µm)")
+        fig.savefig(output / f"{name}_heatmap.png", dpi=180)
+        plt.close(fig)
+
+    fig, axes = plt.subplots(1, 3, figsize=(16, 5), constrained_layout=True)
+    for ax, title, values in zip(axes,
+                                 ("Direct coordinate RMSE", "Polynomial total coordinate RMSE",
+                                  "Polynomial added coordinate RMSE"),
+                                 (metrics["direct"]["coordinate_rmse_mm"],
+                                  metrics["polynomial"]["coordinate_rmse_mm"],
+                                  metrics["quadratic_vs_direct"]["coordinate_rmse_mm"])):
+        mesh = ax.pcolormesh(theta, accommodation, values * 1000.0, shading="nearest", cmap="magma")
+        fig.colorbar(mesh, ax=ax, label="Coordinate RMSE (µm)")
+        ax.contour(theta, accommodation, values * 1000.0, levels=[1.0], colors="cyan", linewidths=1.3)
+        ax.set_title(f"{title}\n(cyan contour = 1 µm)")
+        ax.set_xlabel("Eye rotation, theta (degrees)")
+        ax.set_ylabel("Accommodation (D)")
+    fig.savefig(output / "coordinate_rmse_heatmaps.png", dpi=180)
+    plt.close(fig)
+
+    fig, axes = plt.subplots(2, 2, figsize=(13, 8), constrained_layout=True)
+    for ai in (0, 10, 20, 30, 40, 50):
+        label = f"A={accommodation[ai]:g} D"
+        axes[0, 0].plot(theta, center_abs[ai, :, 0], label=label)
+        axes[0, 1].plot(theta, center_abs[ai, :, 1], label=label)
+        axes[1, 0].plot(theta, center_relative[ai, :, 0], label=label)
+        axes[1, 1].plot(theta, center_relative[ai, :, 1], label=label)
+    for ax, title, coord in zip(axes.ravel(), ("Absolute center x", "Absolute center y",
+                                               "Same-A theta-zero-relative center x",
+                                               "Same-A theta-zero-relative center y"),
+                                ("mm", "mm", "mm", "mm")):
+        ax.axhline(0, color="black", lw=0.7, alpha=0.5)
+        ax.set_title(f"{title} ({coord})")
+        ax.set_xlabel("Eye rotation, theta (degrees)")
+        ax.grid(True, alpha=0.25)
+        ax.legend(fontsize=7)
+    fig.savefig(output / "absolute_and_relative_centers.png", dpi=180)
+    plt.close(fig)
+
+
+def load_and_validate(path: Path) -> tuple[np.ndarray, np.ndarray, np.ndarray, dict]:
+    raw_bytes = path.read_bytes()
+    sha = hashlib.sha256(raw_bytes).hexdigest()
+    records = pickle.loads(raw_bytes)
+    required = {"eye_rotation_deg", "accommodation_d", "field_x_relative", "field_y_relative",
+                "paraxial_x_mm", "paraxial_y_mm", "real_x_mm", "real_y_mm",
+                "center_absolute_x_mm", "center_absolute_y_mm", "z_mm"}
+    if not isinstance(records, np.ndarray) or records.dtype.names is None or not required.issubset(records.dtype.names):
+        raise ValueError("Input is not the expected structured P4 grid array with absolute center fields")
+    accommodation = np.unique(records["accommodation_d"])
+    theta = np.unique(records["eye_rotation_deg"])
+    accommodation.sort(); theta.sort()
+    expected_a = np.linspace(0.0, 5.0, 51)
+    expected_theta = np.linspace(-20.0, 20.0, 401)
+    if not np.allclose(accommodation, expected_a, rtol=0, atol=1e-9):
+        raise ValueError("Expected A=0..5 D at 0.1 D intervals")
+    if not np.allclose(theta, expected_theta, rtol=0, atol=1e-9):
+        raise ValueError("Expected theta=-20..20 degrees at 0.1 degree intervals")
+    z_values = np.unique(records["z_mm"] if "z_mm" in records.dtype.names else np.array([0.0]))
+    if not np.allclose(z_values, 0.0, rtol=0, atol=1e-9):
+        raise ValueError(f"Expected z=0 data, found {z_values}")
+    a_idx = np.searchsorted(accommodation, records["accommodation_d"])
+    t_idx = np.searchsorted(theta, records["eye_rotation_deg"])
+    counts = np.bincount(a_idx * len(theta) + t_idx, minlength=len(accommodation) * len(theta))
+    if not np.all(counts == 9):
+        raise ValueError(f"Expected nine records per A/theta state, counts are {np.unique(counts)}")
+    order = np.lexsort((records["field_y_relative"], records["field_x_relative"], t_idx, a_idx))
+    data = records[order]
+    fields = np.column_stack((data["field_x_relative"], data["field_y_relative"])).reshape(len(accommodation), len(theta), 9, 2)
+    expected_fields = np.array([(x, y) for x in (-1.0, 0.0, 1.0) for y in (-1.0, 0.0, 1.0)])
+    if not np.isfinite(fields).all() or not np.array_equal(fields[0, 0], expected_fields) or not np.all(fields == fields[0:1, 0:1]):
+        raise ValueError("Field identities/order do not match across every state or contain nonfinite values")
+    shape = (len(accommodation), len(theta), 9)
+    real = np.stack((data["real_x_mm"], data["real_y_mm"]), axis=1).reshape(*shape, 2)
+    paraxial = np.stack((data["paraxial_x_mm"], data["paraxial_y_mm"]), axis=1).reshape(*shape, 2)
+    center_raw = np.stack((data["center_absolute_x_mm"], data["center_absolute_y_mm"]), axis=1).reshape(*shape, 2)
+    if not np.isfinite(real).all() or not np.isfinite(paraxial).all() or not np.isfinite(center_raw).all():
+        raise ValueError("Input coordinates/centers contain nonfinite values")
+    center = center_raw[:, :, 0, :]
+    if not np.allclose(center_raw, center[:, :, None, :], rtol=0, atol=1e-10):
+        raise ValueError("Absolute center is not repeated identically across the nine rows of a state")
+    meta = {"input_sha256": sha, "input_bytes": len(raw_bytes), "z_values_mm": z_values,
+            "records_per_state": 9, "raw_record_count": len(records),
+            "selected_a_count": len(accommodation), "selected_theta_count": len(theta)}
+    arrays = {"real": real, "paraxial": paraxial, "center_absolute": center}
+    return accommodation, theta, fields[:, 0], {"provenance": meta, **arrays}
+
+
+def error_dict_from_metrics(metrics: dict) -> dict:
+    return {key: value for key, value in metrics.items() if key != "residual_xy_mm"}
+
+
+def write_report(output: Path, a: np.ndarray, theta: np.ndarray, result: dict) -> None:
+    d, p, q = (result["direct_metrics"], result["polynomial_total_metrics"], result["polynomial_additional_metrics"])
+    poly = result["quadratic_coefficient_fit_metrics"]
+    ignored = result["ignored_accommodation_metrics"]
+    deg = result["quadratic_physical_degree_coefficients_constant_linear_quadratic"]
+    max_where = np.unravel_index(np.argmax(d["maximum_euclidean_point_error_mm"]), d["maximum_euclidean_point_error_mm"].shape)
+    lines = ["# P4 keystone analysis across accommodation and eye rotation", "",
+             f"Input: `{result['input_path']}` ({result['provenance']['input_bytes']} bytes), SHA256 `{result['provenance']['input_sha256']}`. The structured array was validated for A=0..5 D by 0.1 D, theta=-20..20 degrees by 0.1 degrees, z=0, exactly the normalized 3x3 field identities in every state, finite coordinates, and repeated absolute centers.", "",
+             "## Empirical baseline and fit", "",
+             "At every accommodation A, the nine measured real coordinates at theta=0 are the source grid. The direct transform is fitted independently for each (A, theta): `X=sx*x0/(1+q*y0)`, `Y=sy*y0/(1+q*y0)`. This treats the measured theta-zero map as the empirical barrel baseline; no additional radial k1 term is added to those baseline coordinates. The fit has three unconstrained parameters and no translation/shear. The fit and quadratic use all angles in-sample.", "",
+             "## Error definitions", "",
+             "Direct error compares each angle's direct fitted prediction with its measured real grid. The order-2 parameter curves are fitted independently in theta for sx, sy, and q. Polynomial total error compares the composition of those coefficient curves with measured truth. Polynomial additional error compares that polynomial-composed prediction with the same-angle direct prediction, isolating coefficient-curve approximation error. They are stored separately. Coordinate RMSE pools both coordinates across the nine points; max absolute coordinate is over all 18 scalar errors; maximum Euclidean point error is the worst of nine 2D point errors. All reported errors below are in micrometers.", "",
+             "| Metric | Minimum | Mean | Maximum |", "|---|---:|---:|---:|"]
+    for label, obj in (("Direct coordinate RMSE", d), ("Direct max abs coordinate", d), ("Direct max Euclidean point", d),
+                       ("Polynomial total coordinate RMSE", p), ("Polynomial total max Euclidean point", p),
+                       ("Polynomial additional max Euclidean point", q)):
+        key = {"Direct coordinate RMSE":"coordinate_rmse_mm", "Direct max abs coordinate":"maximum_absolute_coordinate_error_mm",
+               "Direct max Euclidean point":"maximum_euclidean_point_error_mm", "Polynomial total coordinate RMSE":"coordinate_rmse_mm",
+               "Polynomial total max Euclidean point":"maximum_euclidean_point_error_mm",
+               "Polynomial additional max Euclidean point":"maximum_euclidean_point_error_mm"}[label]
+        arr = obj[key] * 1000
+        lines.append(f"| {label} (µm) | {np.min(arr):.6g} | {np.mean(arr):.6g} | {np.max(arr):.6g} |")
+    lines += ["", f"Largest direct max-point error: {d['maximum_euclidean_point_error_mm'][max_where]*1000:.6g} µm at A={a[max_where[0]]:g} D, theta={theta[max_where[1]]:g} degrees.",
+              f"Direct algebraic initializer rank values: {np.unique(result['solver_diagnostics']['initializer_rank'])}; condition range {np.min(result['solver_diagnostics']['initializer_condition_number']):.6g} to {np.max(result['solver_diagnostics']['initializer_condition_number']):.6g}. Converged fraction: {np.mean(result['solver_diagnostics']['converged']):.6%}; accepted steps range {np.min(result['solver_diagnostics']['accepted_refinement_steps'])} to {np.max(result['solver_diagnostics']['accepted_refinement_steps'])}. Minimum direct sampled denominator: {np.min(result['minimum_denominator_by_state']):.9g}; polynomial minimum: {np.min(result['polynomial_minimum_denominator_by_state']):.9g}.", "",
+              "## Order-2 theta coefficient model", "",
+              "Each parameter uses an independent unconstrained least-squares polynomial. Coefficients are stored in scaled basis `[1,t,t²]`, `t=theta/20`, and physical-degree basis `[1,theta,theta²]`; physical coefficients are also plotted against accommodation. This is an in-sample fit over all 401 angles. No even/odd symmetry or identity-at-zero constraint is imposed.", "",
+              "At theta=0 the direct per-A fit maps each empirical baseline to itself. The fitted parameters are estimated and not constrained to identity; their ranges are:"]
+    for j, name in enumerate(PARAMETER_NAMES):
+        arr = result["direct_parameters_by_accommodation_theta"][:, int(np.argmin(np.abs(theta))), j]
+        lines.append(f"- `{name}`: {np.min(arr):.12g} to {np.max(arr):.12g} ({PARAMETER_UNITS[j]}).")
+    lines += ["", "Per-A spatial-error summary (mean and worst over theta):", "",
+              "| A (D) | Direct mean max-point (µm) | Direct worst (µm) | Quadratic total mean max-point (µm) | Quadratic total worst (µm) | Quadratic added mean max-point (µm) | Quadratic added worst (µm) |",
+              "|---:|---:|---:|---:|---:|---:|---:|"]
+    for ai in range(len(a)):
+        lines.append(f"| {a[ai]:g} | {np.mean(d['maximum_euclidean_point_error_mm'][ai])*1000:.6g} | {np.max(d['maximum_euclidean_point_error_mm'][ai])*1000:.6g} | "
+                     f"{np.mean(p['maximum_euclidean_point_error_mm'][ai])*1000:.6g} | {np.max(p['maximum_euclidean_point_error_mm'][ai])*1000:.6g} | "
+              f"{np.mean(q['maximum_euclidean_point_error_mm'][ai])*1000:.6g} | {np.max(q['maximum_euclidean_point_error_mm'][ai])*1000:.6g} |")
+    lines += ["", "Quadratic additional coordinate-RMSE summary (µm):",
+              f"Minimum {np.min(q['coordinate_rmse_mm'])*1000:.6g}; mean {np.mean(q['coordinate_rmse_mm'])*1000:.6g}; maximum {np.max(q['coordinate_rmse_mm'])*1000:.6g}.",
+              "Fractions of all A/theta states below 1 µm, by distinct error metric:"]
+    for label, metric_set, key in (("direct coordinate RMSE", d, "coordinate_rmse_mm"),
+                                   ("polynomial total coordinate RMSE", p, "coordinate_rmse_mm"),
+                                   ("polynomial additional coordinate RMSE", q, "coordinate_rmse_mm"),
+                                   ("direct maximum point error", d, "maximum_euclidean_point_error_mm"),
+                                   ("polynomial total maximum point error", p, "maximum_euclidean_point_error_mm"),
+                                   ("polynomial additional maximum point error", q, "maximum_euclidean_point_error_mm")):
+        lines.append(f"- {label}: {np.mean(metric_set[key] < 0.001):.3%}.")
+    lines += ["", "Representative physical-degree coefficients use `c0 + c1*theta_deg + c2*theta_deg^2`; c1 and c2 include per-degree and per-degree-squared units.",
+              "", "| A (D) | Parameter | c0 | c1 (per degree) | c2 (per degree²) |", "|---:|---|---:|---:|---:|"]
+    for ai in (0, 10, 20, 30, 40, 50):
+        for j, name in enumerate(PARAMETER_NAMES):
+            lines.append(f"| {a[ai]:g} | {name} ({PARAMETER_UNITS[j]}) | {deg[ai,0,j]:.10g} | {deg[ai,1,j]:.10g} | {deg[ai,2,j]:.10g} |")
+    lines += ["", "At each A, the quadratic predictions are compared with direct and measured predictions separately below.", "",
+              "At each A, coefficient fit RMSE by parameter (base parameter units):"]
+    lines += ["", "| A (D) | sx RMSE | sy RMSE | q RMSE (mm^-1) | max coefficient condition |", "|---:|---:|---:|---:|---:|"]
+    for ai in (0, 10, 20, 30, 40, 50):
+        lines.append(f"| {a[ai]:g} | {poly['rmse_by_parameter'][ai,0]:.6g} | {poly['rmse_by_parameter'][ai,1]:.6g} | {poly['rmse_by_parameter'][ai,2]:.6g} | {poly['condition_number'][ai]:.6g} |")
+    lines += ["", "## Ignoring accommodation", "", "For this diagnostic, each A's own measured theta-zero source grid is retained. Parameters fitted at A=0 are applied at every angle to each accommodation's own source. Additional error compares this A=0-parameter prediction to the per-A direct prediction; total error compares it to measured truth.", "",
+              f"Ignoring-A additional max point error range: {ignored['additional']['maximum_euclidean_point_error_mm'].min()*1000:.6g}–{ignored['additional']['maximum_euclidean_point_error_mm'].max()*1000:.6g} µm; total max point error range: {ignored['total']['maximum_euclidean_point_error_mm'].min()*1000:.6g}–{ignored['total']['maximum_euclidean_point_error_mm'].max()*1000:.6g} µm.", "",
+              "## Absolute center", "", "Absolute center x/y are validated as repeated across the nine rows per state. Raw center curves are stored and plotted separately from same-A changes `c(A,theta)-c(A,0)`. Accommodation baseline is separately stored as `c(A,0)-c(0,0)`. No center polynomial is imposed.",
+              f"Across all A and theta, the largest absolute same-A theta-zero-relative center component is {np.max(np.abs(result['center_same_accommodation_theta0_relative_xy_mm']))*1000:.6g} µm. The largest A-baseline component at theta=0 relative to A=0 is {np.max(np.abs(result['center_accommodation_baseline_relative_to_A0_theta0_xy_mm']))*1000:.6g} µm.",
+              "", "## Artifacts", "",
+              "- `p4_rotation_transform.pkl`: direct and polynomial predictions, residual/error arrays, parameters, diagnostics, center arrays, and provenance.",
+              "- `coefficient_quadratics.pkl`: scaled and physical-degree coefficient fits by A.",
+              "- `keystone_coefficients_by_accommodation.png`, `physical_quadratic_coefficients_vs_accommodation.png`.",
+              "- Error heatmaps for direct, polynomial total/additional, and ignoring-accommodation total/additional errors; 1 µm contours are cyan.",
+              "- `absolute_and_relative_centers.png`.", ""]
     (output / "report.md").write_text("\n".join(lines), encoding="utf-8")
 
 
@@ -213,125 +352,119 @@ def main() -> None:
     parser.add_argument("--input", type=Path, default=INPUT_PATH)
     parser.add_argument("--output-dir", type=Path, default=OUTPUT_DIR)
     args = parser.parse_args()
-    with args.input.open("rb") as stream:
-        records = pickle.load(stream)
-    required = {"eye_rotation_deg", "accommodation_d", "field_x_relative", "field_y_relative",
-                "paraxial_x_mm", "paraxial_y_mm", "real_x_mm", "real_y_mm"}
-    if not isinstance(records, np.ndarray) or records.dtype.names is None or not required.issubset(records.dtype.names):
-        raise ValueError("Input is not the expected structured P4 grid array")
-    data = records[np.isclose(records["accommodation_d"], 0.0, rtol=0.0, atol=1e-8)]
-    theta = np.unique(data["eye_rotation_deg"])
-    theta.sort()
-    if theta.size != 401 or not np.allclose(theta, np.linspace(-20, 20, 401), rtol=0, atol=1e-9):
-        raise ValueError("Expected all 401 rotations from -20 to +20 degrees at accommodation 0 D")
-    zero_idx = int(np.argmin(np.abs(theta)))
-    angle_index = np.searchsorted(theta, data["eye_rotation_deg"])
-    counts = np.bincount(angle_index, minlength=len(theta))
-    if not np.all(counts == 9):
-        raise ValueError(f"Expected nine records per angle, got counts {np.unique(counts)}")
-    order = np.lexsort((data["field_y_relative"], data["field_x_relative"], angle_index))
-    data = data[order]
-    fields = np.column_stack((data["field_x_relative"], data["field_y_relative"])).reshape(401, 9, 2)
-    if not np.all(fields == fields[0:1]):
-        raise ValueError("Field identities do not match across rotations")
-    real = np.stack((data["real_x_mm"], data["real_y_mm"]), axis=1).reshape(401, 9, 2)
-    paraxial = np.stack((data["paraxial_x_mm"], data["paraxial_y_mm"]), axis=1).reshape(401, 9, 2)
-    if not np.isfinite(real).all() or not np.isfinite(paraxial).all():
-        raise ValueError("Input coordinates contain nonfinite values")
+    accommodation, theta, fields, loaded = load_and_validate(args.input)
+    real, paraxial = loaded["real"], loaded["paraxial"]
+    centers = loaded["center_absolute"]
+    zero = int(np.argmin(np.abs(theta)))
+    baseline = real[:, zero].copy()
+    source = np.broadcast_to(baseline[:, None, :, :], real.shape).copy()
+    flat_source, flat_real = source.reshape(-1, 9, 2), real.reshape(-1, 9, 2)
+    parameters_flat, diagnostics_flat = fit_batched(flat_source, flat_real)
+    parameters = parameters_flat.reshape(len(accommodation), len(theta), 3)
+    direct_prediction_flat, denominator_flat = predict(parameters_flat, flat_source)
+    direct_prediction = direct_prediction_flat.reshape(real.shape)
+    direct_metrics_flat = spatial_metrics(direct_prediction_flat, flat_real)
+    direct_metrics = {k: v.reshape(len(accommodation), len(theta), 9) if k == "point_euclidean_error_mm"
+                      else v.reshape(len(accommodation), len(theta), *v.shape[1:]) for k, v in direct_metrics_flat.items()}
 
-    baseline_real = real[zero_idx].copy()
-    baseline_paraxial = paraxial[zero_idx].copy()
-    source = np.broadcast_to(baseline_real, real.shape).copy()
-    parameters, diagnostics = fit_batched(source, real)
-    prediction, denominators = predict(parameters, source)
-    residuals = prediction - real
-    coordinate_rmse = np.sqrt(np.mean(residuals**2, axis=(1, 2)))
-    max_coordinate_error = np.max(np.abs(residuals), axis=(1, 2))
-    point_errors = np.linalg.norm(residuals, axis=2)
-    point_rms_error = np.sqrt(np.mean(point_errors**2, axis=1))
-    max_point_index = np.argmax(point_errors, axis=1)
-    max_point_error = np.max(point_errors, axis=1)
-    max_point_field = fields[np.arange(len(theta)), max_point_index]
-    scaled_coefficients, quadratic_parameters, coefficient_metrics = fit_quadratic(parameters, theta)
-    # scaled columns are [constant, linear-in-t, quadratic-in-t], t=theta/20.
-    physical_coefficients = scaled_coefficients.copy()
-    physical_coefficients[1] /= 20.0
-    physical_coefficients[2] /= 400.0
-    quadratic_prediction, quadratic_denominator = predict(quadratic_parameters, source)
-    if np.any(quadratic_denominator <= 0):
-        raise ValueError("Quadratic coefficient curve has a nonpositive sampled denominator")
-    quadratic_residuals = quadratic_prediction - real
-    quadratic_coordinate_rmse = np.sqrt(np.mean(quadratic_residuals**2, axis=(1, 2)))
-    quadratic_point_errors = np.linalg.norm(quadratic_residuals, axis=2)
-    quadratic_point_rms_error = np.sqrt(np.mean(quadratic_point_errors**2, axis=1))
-    quadratic_max_point_error = np.max(quadratic_point_errors, axis=1)
-    homographies = np.zeros((len(theta), 3, 3))
-    homographies[:, 0, 0] = parameters[:, 0]
-    homographies[:, 1, 1] = parameters[:, 1]
-    homographies[:, 2, 1] = parameters[:, 2]
-    homographies[:, 2, 2] = 1.0
+    scaled_coeff = np.empty((len(accommodation), 3, 3))
+    quadratic = np.empty_like(parameters)
+    coefficient_metrics = {"rmse_by_parameter": np.empty((len(accommodation), 3)),
+                           "max_abs_by_parameter": np.empty((len(accommodation), 3)),
+                           "rank": np.empty(len(accommodation), dtype=int),
+                           "condition_number": np.empty(len(accommodation))}
+    for ai in range(len(accommodation)):
+        c, fitted, m = fit_quadratic(parameters[ai], theta)
+        scaled_coeff[ai], quadratic[ai] = c, fitted
+        for k in ("rmse_by_parameter", "max_abs_by_parameter"):
+            coefficient_metrics[k][ai] = m[k]
+        coefficient_metrics["rank"][ai] = m["rank"]
+        coefficient_metrics["condition_number"][ai] = m["condition_number"]
+    physical_coeff = scaled_coeff.copy()
+    physical_coeff[:, 1] /= 20
+    physical_coeff[:, 2] /= 400
+    poly_prediction_flat, poly_denominator_flat = predict(quadratic.reshape(-1, 3), flat_source)
+    poly_prediction = poly_prediction_flat.reshape(real.shape)
+    poly_metrics_flat = spatial_metrics(poly_prediction_flat, flat_real)
+    poly_metrics = {k: v.reshape(len(accommodation), len(theta), 9) if k == "point_euclidean_error_mm"
+                    else v.reshape(len(accommodation), len(theta), *v.shape[1:]) for k, v in poly_metrics_flat.items()}
+    quad_direct = predict(quadratic.reshape(-1, 3), flat_source)[0].reshape(real.shape)
+    additional_poly = spatial_metrics(quad_direct, direct_prediction)
+    additional_poly = {k: v.reshape(len(accommodation), len(theta), 9) if k == "point_euclidean_error_mm"
+                       else v.reshape(real.shape) if k == "residual_xy_mm"
+                       else v.reshape(len(accommodation), len(theta)) for k, v in additional_poly.items()}
 
-    args.output_dir.mkdir(parents=True, exist_ok=True)
-    make_plots(theta, parameters, quadratic_parameters, coordinate_rmse,
-               quadratic_coordinate_rmse, args.output_dir)
+    a0_parameters = parameters[0]
+    ignored_pred = predict(np.broadcast_to(a0_parameters, parameters.shape).reshape(-1, 3), flat_source)[0].reshape(real.shape)
+    ignored_total = spatial_metrics(ignored_pred, real)
+    ignored_additional = spatial_metrics(ignored_pred, direct_prediction)
+    ignored = {"total": {k: v for k, v in ignored_total.items() if k != "residual_xy_mm"},
+               "additional": {k: v for k, v in ignored_additional.items() if k != "residual_xy_mm"},
+               "prediction_xy_mm": ignored_pred,
+               "total_residual_xy_mm": ignored_total["residual_xy_mm"],
+               "additional_residual_xy_mm": ignored_additional["residual_xy_mm"]}
+
+    direct_diag = {k: v.reshape(len(accommodation), len(theta)) for k, v in diagnostics_flat.items()
+                   if k != "minimum_denominator_by_theta"}
+    direct_diag["minimum_denominator_by_state"] = denominator_flat.min(axis=1).reshape(len(accommodation), len(theta))
+    center_relative = centers - centers[:, zero:zero+1, :]
+    center_accommodation_baseline = centers[:, zero, :] - centers[0, zero, :]
     result = {
-        "theta_deg": theta,
-        "accommodation_selected_d": 0.0,
-        "accommodation_atol_d": 1e-8,
-        "field_coordinates_relative": fields[0],
-        "baseline_theta0_real_xy_mm": baseline_real,
-        "baseline_theta0_paraxial_xy_mm": baseline_paraxial,
-        "baseline_mapping_assumption": "actual A=0 theta=0 real coordinates are fixed source; baseline radial/barrel distortion is preserved at nine samples",
+        "input_path": str(args.input.resolve()), "provenance": loaded["provenance"],
+        "accommodation_d": accommodation, "theta_deg": theta, "field_coordinates_relative": fields,
+        "baseline_theta0_real_xy_mm_by_accommodation": baseline,
+        "baseline_theta0_paraxial_xy_mm_by_accommodation": paraxial[:, zero],
+        "baseline_mapping_assumption": "At each A, theta=0 measured real points are the empirical barrel baseline; no additional radial coefficient is added.",
         "composition_formula": "X=sx*x0/(1+q*y0); Y=sy*y0/(1+q*y0)",
-        "parameter_names": PARAMETER_NAMES,
-        "parameter_units": PARAMETER_UNITS,
-        "parameters_by_theta": parameters,
-        "quadratic_parameters_by_theta": quadratic_parameters,
-        "quadratic_physical_degree_coefficients_constant_linear_quadratic": physical_coefficients,
-        "restricted_homography_matrices_3x3": homographies,
-        "predicted_real_xy_mm": prediction,
-        "point_residuals_xy_mm": residuals,
-        "coordinate_rmse_mm": coordinate_rmse,
-        "maximum_absolute_coordinate_error_mm": max_coordinate_error,
-        "point_euclidean_errors_mm": point_errors,
-        "rms_euclidean_point_error_mm": point_rms_error,
-        "maximum_point_error_mm": max_point_error,
-        "maximum_point_field_coordinates_relative": max_point_field,
-        "quadratic_predicted_real_xy_mm": quadratic_prediction,
-        "quadratic_point_residuals_xy_mm": quadratic_residuals,
-        "quadratic_coordinate_rmse_mm": quadratic_coordinate_rmse,
-        "quadratic_point_rms_error_mm": quadratic_point_rms_error,
-        "quadratic_maximum_point_error_mm": quadratic_max_point_error,
-        "coefficient_curve_rmse": coefficient_metrics["rmse_by_parameter"],
-        "coefficient_curve_max_abs_error": coefficient_metrics["max_abs_by_parameter"],
-        "minimum_denominator_by_theta": np.min(denominators, axis=1),
-        "quadratic_minimum_denominator_by_theta": np.min(quadratic_denominator, axis=1),
-        "solver_diagnostics": diagnostics,
+        "parameter_names": PARAMETER_NAMES, "parameter_units": PARAMETER_UNITS,
+        "direct_parameters_by_accommodation_theta": parameters,
+        "quadratic_parameters_by_accommodation_theta": quadratic,
+        "quadratic_scaled_coefficients_rows_basis_columns": scaled_coeff,
+        "quadratic_physical_degree_coefficients_constant_linear_quadratic": physical_coeff,
+        "predicted_real_xy_mm": direct_prediction,
+        "direct_metrics": error_dict_from_metrics(direct_metrics),
+        "direct_residual_xy_mm": direct_metrics["residual_xy_mm"],
+        "polynomial_predicted_real_xy_mm": poly_prediction,
+        "polynomial_total_metrics": error_dict_from_metrics(poly_metrics),
+        "polynomial_total_residual_xy_mm": poly_metrics["residual_xy_mm"],
+        "polynomial_additional_metrics": error_dict_from_metrics(additional_poly),
+        "polynomial_additional_residual_xy_mm": additional_poly["residual_xy_mm"],
+        "direct_point_euclidean_error_mm": direct_metrics["point_euclidean_error_mm"],
+        "polynomial_total_point_euclidean_error_mm": poly_metrics["point_euclidean_error_mm"],
+        "polynomial_additional_point_euclidean_error_mm": additional_poly["point_euclidean_error_mm"],
+        "minimum_denominator_by_state": denominator_flat.min(axis=1).reshape(len(accommodation), len(theta)),
+        "polynomial_minimum_denominator_by_state": poly_denominator_flat.min(axis=1).reshape(len(accommodation), len(theta)),
+        "solver_diagnostics": direct_diag,
+        "quadratic_coefficient_fit_metrics": coefficient_metrics,
+        "ignored_accommodation_metrics": ignored,
+        "center_absolute_xy_mm": centers,
+        "center_same_accommodation_theta0_relative_xy_mm": center_relative,
+        "center_accommodation_baseline_relative_to_A0_theta0_xy_mm": center_accommodation_baseline,
     }
+    args.output_dir.mkdir(parents=True, exist_ok=True)
+    make_plots(theta, accommodation, parameters, quadratic, physical_coeff,
+               {"direct": result["direct_metrics"], "polynomial": result["polynomial_total_metrics"],
+                "quadratic_vs_direct": result["polynomial_additional_metrics"]}, ignored,
+               centers, center_relative, args.output_dir)
     with (args.output_dir / "p4_rotation_transform.pkl").open("wb") as stream:
         pickle.dump(result, stream, protocol=pickle.HIGHEST_PROTOCOL)
-    coefficient_artifact = {
-        "parameter_names": PARAMETER_NAMES,
-        "parameter_units": PARAMETER_UNITS,
-        "basis_scaled": "[1,t,t^2], t=theta_deg/20",
-        "basis_physical": "[1,theta_deg,theta_deg^2]",
-        "scaled_coefficients_rows_basis_columns": scaled_coefficients,
-        "physical_degree_coefficients_constant_linear_quadratic": physical_coefficients,
-        "coefficient_curve_rmse_by_parameter": coefficient_metrics["rmse_by_parameter"],
-        "coefficient_curve_max_abs_error_by_parameter": coefficient_metrics["max_abs_by_parameter"],
-        "fit_rank": coefficient_metrics["rank"],
-        "fit_condition_number": coefficient_metrics["condition_number"],
-        "fit_scope": "unconstrained ordinary least squares over all 401 direct coefficient estimates; in-sample",
-    }
     with (args.output_dir / "coefficient_quadratics.pkl").open("wb") as stream:
-        pickle.dump(coefficient_artifact, stream, protocol=pickle.HIGHEST_PROTOCOL)
-    write_report(args.output_dir, theta, parameters,
-                 physical_coefficients, coefficient_metrics["rmse_by_parameter"],
-                 coefficient_metrics["max_abs_by_parameter"], coordinate_rmse, max_coordinate_error,
-                 point_rms_error, max_point_error, quadratic_coordinate_rmse,
-                 quadratic_point_rms_error, quadratic_max_point_error,
-                 max_point_field, diagnostics)
-    print(f"Wrote single composed baseline-plus-keystone analysis to {args.output_dir.resolve()}")
+        pickle.dump({"parameter_names": PARAMETER_NAMES, "parameter_units": PARAMETER_UNITS,
+                     "accommodation_d": accommodation, "theta_deg": theta,
+                     "basis_scaled": "[1,t,t^2], t=theta_deg/20", "basis_physical": "[1,theta_deg,theta_deg^2]",
+                     "scaled_coefficients_rows_basis_columns": scaled_coeff,
+                     "physical_degree_coefficients_constant_linear_quadratic": physical_coeff,
+                     **coefficient_metrics, "fit_scope": "per-accommodation unconstrained OLS over all 401 angle estimates"}, stream,
+                    protocol=pickle.HIGHEST_PROTOCOL)
+    write_report(args.output_dir, accommodation, theta, result)
+    ranks = np.unique(direct_diag["initializer_rank"])
+    print(f"Input SHA256: {loaded['provenance']['input_sha256']}")
+    print(f"Wrote P4 accommodation/rotation analysis for {len(accommodation)} x {len(theta)} states to {args.output_dir.resolve()}")
+    print(f"Direct max-point error range: {direct_metrics['maximum_euclidean_point_error_mm'].min()*1000:.6g}–{direct_metrics['maximum_euclidean_point_error_mm'].max()*1000:.6g} um")
+    print(f"Polynomial-total max-point error range: {poly_metrics['maximum_euclidean_point_error_mm'].min()*1000:.6g}–{poly_metrics['maximum_euclidean_point_error_mm'].max()*1000:.6g} um")
+    print(f"Polynomial-additional max-point error max: {additional_poly['maximum_euclidean_point_error_mm'].max()*1000:.6g} um")
+    print(f"Ignoring accommodation additional max-point error max: {ignored_additional['maximum_euclidean_point_error_mm'].max()*1000:.6g} um")
+    print(f"Rank values {ranks}; convergence {np.mean(direct_diag['converged']):.6%}; minimum sampled denominator {denominator_flat.min():.9g}")
 
 
 if __name__ == "__main__":
