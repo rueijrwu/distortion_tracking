@@ -37,14 +37,19 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--rotation-min", type=float, default=-20.0)
     parser.add_argument("--rotation-max", type=float, default=20.0)
-    parser.add_argument("--rotation-count", type=int, default=101)
+    parser.add_argument("--rotation-count", type=int, default=401)
+    parser.add_argument("--translation-min", type=float, default=-1.0)
+    parser.add_argument("--translation-max", type=float, default=1.0)
+    parser.add_argument("--translation-count", type=int, default=3)
     args = parser.parse_args()
-    if args.rotation_count < 1 or args.rotation_max < args.rotation_min:
-        parser.error("rotation count must be positive and max must be >= min")
+    if (args.rotation_count < 1 or args.rotation_max < args.rotation_min
+            or args.translation_count < 1 or args.translation_max < args.translation_min):
+        parser.error("counts must be positive and max values must be >= min values")
     if not SEQ.is_file():
         raise FileNotFoundError(SEQ)
 
     rotations = np.linspace(args.rotation_min, args.rotation_max, args.rotation_count)
+    translations = np.linspace(args.translation_min, args.translation_max, args.translation_count)
     rows = []
     cv = None
     started = False
@@ -79,35 +84,51 @@ def main() -> None:
             ):
                 raise RuntimeError(f"Object distance readback at {z}: expected {expected_distance}, got {actual_distance}")
 
-        for i, angle in enumerate(rotations, 1):
-            checked(cv, f"ade {S_RC} {angle:.8f};set vig")
-            actual = cv_eval(cv, "ade", S_RC)
-            if not math.isclose(actual, float(angle), abs_tol=1e-7, rel_tol=0.0):
-                raise RuntimeError(f"RC ADE readback mismatch: requested {angle}, got {actual}")
-            for zoom_no, title, object_y, object_distance in ZOOMS:
-                z = f"z{zoom_no}"
-                response = cv.Command(f"rsi r1 fl {z} si")
-                failed = "error" in response.lower()
-                err = ""
-                real_y = math.nan
-                if failed:
-                    err = response.strip()
-                else:
-                    try:
-                        real_y = cv_eval(cv, "y", "r1", "fl", z, "si")
-                        if not math.isfinite(real_y):
+        for ti, translation in enumerate(translations, 1):
+            checked(cv, f"yde {S_RC} {translation:.8f}")
+            actual_translation = cv_eval(cv, "yde", S_RC)
+            if not math.isclose(actual_translation, float(translation), abs_tol=1e-7, rel_tol=0.0):
+                raise RuntimeError(
+                    f"RC YDE readback mismatch: requested {translation}, got {actual_translation}"
+                )
+            for i, angle in enumerate(rotations, 1):
+                checked(cv, f"ade {S_RC} {angle:.8f};set vig")
+                actual_rotation = cv_eval(cv, "ade", S_RC)
+                actual_translation = cv_eval(cv, "yde", S_RC)
+                if not math.isclose(actual_rotation, float(angle), abs_tol=1e-7, rel_tol=0.0):
+                    raise RuntimeError(f"RC ADE readback mismatch: requested {angle}, got {actual_rotation}")
+                if not math.isclose(actual_translation, float(translation), abs_tol=1e-7, rel_tol=0.0):
+                    raise RuntimeError(
+                        f"RC YDE changed during trace: expected {translation}, got {actual_translation}"
+                    )
+                for zoom_no, title, object_y, object_distance in ZOOMS:
+                    z = f"z{zoom_no}"
+                    response = cv.Command(f"rsi r1 fl {z} si")
+                    failed = "error" in response.lower()
+                    err = ""
+                    real_y = math.nan
+                    if failed:
+                        err = response.strip()
+                    else:
+                        try:
+                            real_y = cv_eval(cv, "y", "r1", "fl", z, "si")
+                            if not math.isfinite(real_y):
+                                failed = True
+                                err = "nonfinite SI y"
+                        except Exception as exc:
                             failed = True
-                            err = "nonfinite SI y"
-                    except Exception as exc:
-                        failed = True
-                        err = repr(exc)
-                rows.append((float(angle), zoom_no, 1, title, object_y, object_distance,
-                             real_y, not failed, err))
-            if i == 1 or i == len(rotations) or i % max(1, len(rotations) // 20) == 0:
-                print(f"Rotation {i}/{len(rotations)}: {angle:.4f} deg", flush=True)
+                            err = repr(exc)
+                    rows.append((float(translation), float(angle), zoom_no, 1, title,
+                                 object_y, object_distance, real_y, not failed, err))
+                if i == 1 or i == len(rotations) or i % max(1, len(rotations) // 10) == 0:
+                    print(
+                        f"Translation {ti}/{len(translations)} ({translation:.2f} mm), "
+                        f"rotation {i}/{len(rotations)} ({angle:.2f} deg)", flush=True
+                    )
 
         dtype = np.dtype([
-            ("rotation_deg", "f8"), ("zoom_number", "i4"), ("field_number", "i4"),
+            ("h_translation_mm", "f8"), ("rotation_deg", "f8"),
+            ("zoom_number", "i4"), ("field_number", "i4"),
             ("zoom_title", "U8"), ("object_y", "f8"), ("object_distance_mm", "f8"),
             ("real_y_si_mm", "f8"), ("trace_success", "?"), ("error", "U512"),
         ])
