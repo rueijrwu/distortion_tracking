@@ -1,6 +1,45 @@
 # Distortion model summary
 
-**Current validated P4 result (2026-10-13):** The accommodation-specific quadratic-in-rotation keystone model does not meet the 1 um coordinate-error reference across the validated domain: total coordinate RMSE averages 4.46151 um and reaches 14.5312 um, with substantial variation by accommodation. The replacement P4 grid contains 184,059 records: 51 accommodations from 0 to 5 D in 0.1 D steps, 401 RC rotations from -20 to +20 degrees in 0.1 degree steps, and nine normalized fields per state. The pickle SHA-256 is `1d68ca2c237c76fa06539efce4911fe9ff87e203c0b11051eb4f013cbafe4b5a`. Its model, `Lens/p4_ME.len`, has SHA-256 `fb3937e6763f27e331faa10a4863533e994030cbc0ae74364b186ba0d06d474d`; this is the same model hash recorded by the retained P4 Z study. The pre-replacement P4 accommodation/rotation LEN model SHA-256 `5e0715c70016fbcec8a49956dd2ec824a50f5c4c52ca472b0225a2523db614ac` is historical model provenance only.
+## Current audited status (2026-11-08)
+
+The latest implemented result is an **87-scalar hybrid calibration**, not a complete physical lens model. It combines geometry-motivated P4 field transformations with separately fitted centroid, gaze, and central-motion maps. The older radial, keystone, and four-corner results below remain dated historical comparisons; their statements that a model was “current” refer to the time of those analyses. [Theory.md](Theory.md#current-hybrid-model-and-geometric-interpretation-2026-11-08) gives the exact equations and their physical limits.
+
+The frozen A=0 core has **independent P1 and P4 channels**. Each has its own anchored nine-scalar centroid-bias cubic `B_j(g)` and its own full two-input, degree-three gaze polynomial `G_j(c_j)` with ten vector coefficients (a 10×2 matrix, 20 scalars). The two channels have the same B/G forms but **different fitted coefficients and coordinate normalizers**. P1 and P4 each used 25 distinct A=0 gaze calibration poses. P1 has no fitted full nine-ray projective/Brown/radial warp in this active pipeline. The equal-form claim therefore applies to their A=0 centroid and gaze maps, not to complete grid-distortion models.
+
+P4 additionally uses a 27-scalar center-relative nine-field family: 12 frozen A=0 projective-first PF12 coefficients, 12 newly fitted accommodation×gaze interactions, and three new on-axis scale/radial-strength terms. Its A=0 PF12 shape is adjusted at the **eight sampled outer rays** so its nine-ray mean equals the separately fitted P4 `B4(g)` while the labeled central field stays at zero. This discrete mean anchor is an empirical workaround; it is not a continuous optical warp. A separately fitted two-scalar diagonal `M1` normalizes P4 central-ray motion about the measured zero-gaze pivot `[0,0]` mm. Both accommodation extensions vanish at A=0. The 87 fitted scalars comprise 58 frozen B/G values + 12 frozen PF12 values + 15 new P4 field values + 2 new M1 values; **17 were newly estimated in this extension**. Measured references and saved coordinate normalizers are separate constants. The PF12 gaze basis changes from `/12.4` to `/20` in the SparseModel implementation, so each frozen coefficient is converted by `(20/12.4)^(i+j)`; the raw measured reference rays, length scale, and transform order remain fixed.
+
+At runtime P1 first estimates gaze from its own observed nine-ray mean. That independent P1 estimate seeds a P4 accommodation profile from the observed mean-centered nine-ray grid. The P4 loop then subtracts the predicted full-field mean to estimate the labeled center, applies `M1^{-1}` to return that center to the A=0 frame, applies frozen `G4`, and re-profiles accommodation from the full P4 grid. It uses no true A, gaze, or labeled center as an inference input, and does not fuse the P1 and P4 gaze estimates. A control holds the **observation-derived** initial accommodation fixed while iterating P4 gaze; it never holds the true A.
+
+Calibration and evaluation use the pinned paired source [source_subset.npz](data/p4_p1_limited_gaze_12p5/source_subset.npz) (SHA-256 `97c6db1b455f9abf7354351fa768cca7eea67198d8a4bfd14bbe684475462daf`). The new P4 accommodation field and M1 calibration use 75 known poses: 25 gaze nodes `{−12.4,−6.4,0,6.4,12.4}²` at A = 0, 2, 4 D. The field extension fits 15/15 Jacobian directions (raw/column-scaled condition 96.54/29.56). Its **training** outer-eight coordinate RMS is 2.099 µm (vertex RMS 2.969 µm). M1 was selected over a four-scalar quadratic scale by 24 grouped calibration folds and a one-SE rule: normalized-center CV RMS 7.0416 versus 7.0378 µm, respectively. The actual corrected F grids had no cell-orientation reversals on calibration, bounded probes, or all saved primary final states; the smallest primary triangle-area ratio to the raw A=0 reference was 0.84725. These are sampled-grid regularity checks, not a global continuous-warp proof.
+
+The complete common holdout contains 83,250 states across 21 accommodation planes and the actual sampled gaze support ±12.4° (the runtime bound is ±12.5°). It excludes the union of 99 prior/new calibration rows. The user-excluded P1 gaze `(ADE,BDE)=(12°,9.6°)` is retained in the artifact at all 21 A planes as a separate diagnostic, leaving **83,229 primary states**. That observation has not been independently retraced or established as physically invalid. The earlier A=0-only holdout has 3,943 primary rows; the A=0 slice of the full common holdout has 3,935 because its union exclusion removes eight more rows.
+
+| Full common primary (83,229 states) | Result |
+|---|---:|
+| P1 independent gaze radial RMS | 0.002954° |
+| P1-conditioned initial A RMS | 0.027534 D |
+| Final joint A bias / RMS / P95 absolute / maximum absolute | −0.002192 / 0.025896 / 0.051393 / 0.180322 D |
+| Final P4 gaze radial RMS / P95 / maximum | 0.015035° / 0.028821° / 0.034350° |
+| Final P4 labeled-center vector RMS / P95 / maximum | 0.8420 / 1.9476 / 2.6661 µm |
+| Fixed P1-conditioned-A control P4 gaze radial RMS | 0.0147033° |
+
+All 83,229 primary runs converged with the P1-conditioned start; no alternate rescue, fast-to-strict profile fallback, or gaze-bound hit was needed. Joint feedback improves accommodation RMS relative to its initial profile but **slightly worsens P4 gaze RMS** relative to the fixed-A control. The 3,249 final A-bound estimates occurred only at true A endpoints (641 at 0 D, 2,608 at 4 D); no interior true-A state clipped to a bound. The full fast41 **batch** took 233.885 s; this is not single-frame latency. A predeclared 512-primary-plus-21-diagnostic pilot matched strict401 to at most `8.73e−8` D in final A and `8.78e−9`° per gaze component, with no fast fallback.
+
+The forced-**known**-A=0 control on its own 3,943 primary holdout reproduces the frozen independent P4 gaze and center arrays exactly (P4 gaze radial RMS 0.000314627°). The **unknown**-A solver on the 3,935 true-A=0 common states instead estimates A (RMS 0.004060 D) and has P4 gaze radial RMS 0.00056944°. Known A=0 is an identity check, not an input silently supplied to the unknown-A run.
+
+The [final run summary](data/p4_unified_combined/runtime/full_fast41/summary.json) and [row-level arrays](data/p4_unified_combined/runtime/full_fast41/runtime.npz) are the canonical results; the fitted [P4 field](data/p4_unified_combined/calibration/full_field_profile_final/p4_full_field_27.npz) and selected [M1 scale](data/p4_unified_combined/calibration/center_motion/central_motion_M1.npz) are frozen artifacts. The result applies to a dense, correlated, **noiseless ray-traced interpolation** in the recorded nominal P1/P4 frames. It is not independent hardware validation, an external registration check, a sensor-noise or calibration-label uncertainty study, or evidence of extrapolation beyond the sampled field, gaze, and A ranges. Repeated P1 patterns across A are not additional independent P1 measurements. Full-rank fits, many ray coordinates per pose, and a parameter count below the number of poses do not by themselves establish identifiability or rule out overfitting; frozen A=0 coefficients, zero-vanishing A terms, grouped calibration CV, predeclared holdouts, and exact A=0 checks constrain but do not remove that risk.
+
+### Intended geometry-first replacement (not implemented)
+
+The user-directed next model should fit **absolute positions of all nine labeled rays** for P1 and P4 with the same transform family and independent coefficients, including each labeled central ray. P4 accommodation dependence should enter that forward transform and vanish at A=0. A fitted absolute-coordinate transform would derive `c_j` from its central ray and `b_j=mean(all nine rays)−c_j` from its own grid, without a separate B polynomial, eight-ray mean anchor, or independent M1 center-motion correction. The present centered P4 H fixes field 4 at zero and omits absolute central-ray motion, so B4 and M1 are **not algebraically redundant inside the current parameterization**; their possible removal requires this redesign and new calibration. A geometry-motivated projective/Brown/radial fit remains an empirical surrogate until linked to the source, optical surfaces, accommodation geometry, and sensor projection; a self-consistent inverse alone does not prove physical accuracy.
+
+The intended default keeps the separately fitted ten-vector `G1` and `G4` gaze maps as readouts or initializers on centers **derived from the new forward grids**. Estimating gaze directly with a complete geometric inverse is a separate architectural option, not an implemented decision. Before fitting, fix labeled central-ray identity, sensor origin/scale/orientation, and a physical or calibrated distortion pivot; do not allow interchangeable free center and translation parameters or force P1/P4 coefficients equal. The next ablation should calibrate same-form independent absolute full-grid P1/P4 models on the 25 A=0 poses, then P4 A terms on the 75 known-A poses, with no B/mean-anchor/M1 branch. Compare full-field residuals **and** labeled-central-ray error, gaze/A/convergence on the same 3,943/83,229 masks, A=0 identity, calibration-only rank/conditioning/grouped CV, and realistic sensor, gaze-label, and frame/registration perturbations. Those tests are proposed, not completed; neither lower parameter count nor better accuracy is promised.
+
+## Historical per-accommodation and four-corner analyses
+
+The following sections retain their original dated measurements and language for provenance. They do not supersede the 2026-11-08 status above.
+
+**Historical P4 result (2026-10-13):** The accommodation-specific quadratic-in-rotation keystone model described below does not meet the 1 um coordinate-error reference across the validated domain: total coordinate RMSE averages 4.46151 um and reaches 14.5312 um, with substantial variation by accommodation. **This per-accommodation keystone was superseded at that stage by** the jointly-fit four-corner model in [Theory.md](Theory.md) ("P4 joint corner model"), whose pooled four-corner vertex RMS is 6.815869 um mean / 21.348234 um worst over all 20,451 states; the two are not directly comparable (different field subset — four corners vs. nine fields — and different baseline convention). The sections below retain the per-accommodation analysis for its accommodation-curve detail. The replacement P4 grid contains 184,059 records: 51 accommodations from 0 to 5 D in 0.1 D steps, 401 RC rotations from -20 to +20 degrees in 0.1 degree steps, and nine normalized fields per state. The pickle SHA-256 is `1d68ca2c237c76fa06539efce4911fe9ff87e203c0b11051eb4f013cbafe4b5a`. Its model, `Lens/p4_ME.len`, has SHA-256 `fb3937e6763f27e331faa10a4863533e994030cbc0ae74364b186ba0d06d474d`; this is the same model hash recorded by the retained P4 Z study. The pre-replacement P4 accommodation/rotation LEN model SHA-256 `5e0715c70016fbcec8a49956dd2ec824a50f5c4c52ca472b0225a2523db614ac` is historical model provenance only.
 
 ## P4 radial fit at Z=0, rotation=0
 
@@ -73,6 +112,24 @@ A common `alpha ~= 0.00295 mm^-1` is convenient over this sampled range; use the
 
 See the [P4 Z report](data/p4_z_magnification/p4_z_magnification.md), [plot](data/p4_z_magnification/p4_z_magnification.png), [metadata](data/p4_z_magnification/metadata.json), [fit artifact](data/p4_z_magnification/p4_z_magnification_fit.pkl), and [script](Script/analyze_p4_z_magnification.py).
 
-## Validation scope
+## Historical candidate absolute-coordinate composition and open questions
+
+*(Folded in from the former HANDOFF.md, which has been merged into this file and removed; see [Theory.md](Theory.md) for the formulas.)*
+
+A possible absolute-coordinate model is
+
+$$
+\widehat{\mathbf p}_{\mathrm{abs},i}(\theta,A)
+=
+\mathbf c_{\mathrm{abs}}(\theta,A)
++
+K_{\theta,A}\!\left(\widehat{\mathbf b}_i(A)\right),
+$$
+
+where `K` is the pre-joint-model per-accommodation keystone transform (see Theory.md, "Historical pre-joint-model P4 analyses"). This composition has not been validated end to end: the keystone errors reported there use the measured baseline `b_i(A)`, not the radially-fitted `b_hat_i(A)`, and the center term `c_abs(theta,A)` has no fitted law at all. A possible continuous accommodation description of the keystone coefficient matrix is `C(A)=C_0+C_1*A` (quadratic term only if composed Cartesian errors warrant it) — this is a proposal, not a fitted result. The accommodation dependence of paraxial scale likewise remains without a fitted law.
+
+Current P1 fit results are not established for the current P1 data. An eventual eye-rotation inference using the center and four corners, with 1 µm Gaussian measurement noise, has not been evaluated; the residual metrics in this file use all nine field points (or, for the joint corner model in Theory.md, four corners). The remaining scientific questions are how to represent the observed spatial residuals, how many rotation terms are useful, what accommodation dependence is needed for keystone coefficients and paraxial scale, and how the barrel, keystone, and center components perform together in Cartesian coordinates.
+
+## Validation scope of the historical fits
 
 The radial and rotation fits use all measured states in-sample and have no held-out data or simulated-noise trials. Their residuals therefore do not establish angular precision or hardware accuracy. The 1 um line used in reports and plots is a measurement reference for coordinate error only.

@@ -173,6 +173,125 @@ def calculate_grid_at_rotation(
     return rows
 
 
+def calculate_grid_at_biaxial_rotation(
+    cv, ade_deg: float, bde_deg: float, grid_lines: int, fov_x: float, fov_y: float,
+    z_mm: float | None = None,
+) -> list[dict[str, float]]:
+    """Two-axis variant of calculate_grid_at_rotation: ADE (Ey) and BDE (Ex) on RC.
+
+    ADE tilts about the local X-axis (vertical/Y gaze deviation, Ey); BDE tilts
+    about the local Y-axis (horizontal/X gaze deviation, Ex). Both are driven
+    and read back; the single-axis calculate_grid_at_rotation above is left
+    untouched since the P1 collector depends on its exact signature.
+    """
+    commands = [f"ade {S_RC} {ade_deg:.8f}", f"bde {S_RC} {bde_deg:.8f}"]
+    if z_mm is not None:
+        commands.append(f"thi {S_Z_MOV} {float(z_mm):.8f}")
+    command = ";".join(commands + ["set vig"])
+    response = cv.Command(command)
+    actual_ade = cv_eval(cv, "ade", S_RC)
+    actual_bde = cv_eval(cv, "bde", S_RC)
+    if "Command End:" not in response or any(
+        line.lstrip().lower().startswith("error:") for line in response.splitlines()
+    ):
+        raise RuntimeError(
+            f"CODE V reported an error for RC rotation ADE={ade_deg:g}°, "
+            f"BDE={bde_deg:g}°: {response!r}"
+        )
+    if not math.isclose(actual_ade, ade_deg, rel_tol=0.0, abs_tol=1e-7):
+        raise RuntimeError(
+            f"CODE V did not apply requested RC ADE {ade_deg:g}° "
+            f"(read back {actual_ade:g}°; command response: {response!r})"
+        )
+    if not math.isclose(actual_bde, bde_deg, rel_tol=0.0, abs_tol=1e-7):
+        raise RuntimeError(
+            f"CODE V did not apply requested RC BDE {bde_deg:g}° "
+            f"(read back {actual_bde:g}°; command response: {response!r})"
+        )
+    if z_mm is not None:
+        actual_z = cv_eval(cv, "thi", S_Z_MOV)
+        if not math.isclose(actual_z, float(z_mm), rel_tol=0.0, abs_tol=1e-8):
+            raise RuntimeError(
+                f"CODE V did not apply requested cornea movement {z_mm:g} mm "
+                f"(read back {actual_z:g} mm; command response: {response!r})"
+            )
+        print(f"  Cornea movement readback verified: {actual_z:g} mm", flush=True)
+    print(f"  RC readback verified: ADE={actual_ade:g}°, BDE={actual_bde:g}°", flush=True)
+    # Restore the original angular field specification before each rotation;
+    # the DIST reference calculation below changes the active specification to XOB/YOB.
+    cv.Command(f"xan 0 {fov_x:.12g};yan 0 {fov_y:.12g}")
+
+    # DIST switches to equivalent object-height fields for its reference grid.
+    xob_f2 = cv_eval(cv, "xob", "f2", "z1")
+    yob_f2 = cv_eval(cv, "yob", "f2", "z1")
+    cv.Command(f"yob 0 {yob_f2:.12g};xob 0 {xob_f2:.12g}")
+
+    center = trace_rsi(cv, 0.0, 0.0, field_number=1)
+    if center is None:
+        raise RuntimeError(
+            f"Center chief ray failed at RC ADE={ade_deg:g}°, BDE={bde_deg:g}°"
+        )
+    near_axis = trace_rsi(cv, 0.05, 0.05)
+    if near_axis is None:
+        raise RuntimeError(
+            f"Central 5% reference ray failed at RC ADE={ade_deg:g}°, BDE={bde_deg:g}°"
+        )
+    x_corner = near_axis[0] - center[0]
+    y_corner = near_axis[1] - center[1]
+    delta_x = 40.0 * x_corner / (grid_lines - 1)
+    delta_y = 40.0 * y_corner / (grid_lines - 1)
+
+    rows: list[dict[str, float]] = []
+    for i in range(grid_lines):
+        relative_y = 1.0 - 2.0 * i / (grid_lines - 1)
+        paraxial_y = ((grid_lines - 1) / 2.0 - i) * delta_y
+        for j in range(grid_lines):
+            relative_x = -1.0 + 2.0 * j / (grid_lines - 1)
+            paraxial_x = (j - (grid_lines - 1) / 2.0) * delta_x
+            real = trace_rsi(cv, relative_x, relative_y)
+            if real is None:
+                if i in (0, grid_lines - 1) or j in (0, grid_lines - 1):
+                    raise RuntimeError(
+                        f"Edge chief ray failed at RC ADE={ade_deg:g}°, BDE={bde_deg:g}°, "
+                        f"relative field=({relative_x:g}, {relative_y:g})"
+                    )
+                real_x = real_y = radial = tangential = math.nan
+            else:
+                real_x = real[0] - center[0]
+                real_y = real[1] - center[1]
+                residual_x = real_x - paraxial_x
+                residual_y = real_y - paraxial_y
+                radius_squared = paraxial_x**2 + paraxial_y**2
+                if radius_squared < 1e-20:
+                    radial = tangential = 0.0
+                else:
+                    radial = (
+                        residual_x * paraxial_x + residual_y * paraxial_y
+                    ) / radius_squared * 100.0
+                    tangential = (
+                        residual_x * paraxial_y - residual_y * paraxial_x
+                    ) / radius_squared * 100.0
+
+            rows.append(
+                {
+                    "field_x_relative": relative_x,
+                    "field_y_relative": relative_y,
+                    "paraxial_x_mm": paraxial_x,
+                    "paraxial_y_mm": paraxial_y,
+                    "center_absolute_x_mm": center[0],
+                    "center_absolute_y_mm": center[1],
+                    "real_x_mm": real_x,
+                    "real_y_mm": real_y,
+                    "radial_distortion_pct": radial,
+                    "tangential_distortion_pct": tangential,
+                    "eye_rotation_deg": float(ade_deg),
+                    "eye_rotation_x_deg": float(bde_deg),
+                    "z_mm": float(z_mm) if z_mm is not None else math.nan,
+                }
+            )
+    return rows
+
+
 def write_pickle(rows: list[dict[str, float]], path: Path) -> None:
     columns = [
         "eye_rotation_deg",

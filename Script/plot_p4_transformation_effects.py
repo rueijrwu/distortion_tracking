@@ -141,13 +141,25 @@ def error_summary(pred, actual, corners, other):
     return summary(corners), summary(other), summary(np.arange(len(e)))
 
 
-def plot_grid(ax, coords, color, linestyle="-", lw=1.5, zorder=3):
-    """Draw the outer native-grid perimeter and center sample, omitting middle cross-lines."""
+def plot_grid(ax, coords, color, linestyle="-", lw=1.5, zorder=3, include_cross=False):
+    """Draw the native-grid perimeter and center sample, optionally with middle cross-lines."""
     arr = np.asarray(coords).reshape(3, 3, 2)
-    for i in (0, 2):
+    line_ids = (0, 1, 2) if include_cross else (0, 2)
+    for i in line_ids:
         ax.plot(arr[i, :, 0], arr[i, :, 1], color=color, lw=lw, ls=linestyle, zorder=zorder)
         ax.plot(arr[:, i, 0], arr[:, i, 1], color=color, lw=lw, ls=linestyle, zorder=zorder)
     ax.scatter([arr[1, 1, 0]], [arr[1, 1, 1]], s=17, color=color, edgecolors="none", zorder=zorder + 2)
+
+
+def plot_sample_markers(ax, coords, color, marker, zorder):
+    """Mark every sampled field location without adding connecting lines."""
+    arr = np.asarray(coords).reshape(3, 3, 2)
+    ax.scatter(
+        arr[..., 0].ravel(), arr[..., 1].ravel(),
+        s=38 if marker == "o" else 16, marker=marker,
+        facecolors="white" if marker == "o" else color,
+        edgecolors=color, linewidths=1.0 if marker == "o" else 0.6, zorder=zorder,
+    )
 
 
 def transpose_coords(coords):
@@ -256,6 +268,50 @@ def main():
     fig.savefig(args.output_dir / "p4_transformation_stages.svg", facecolor="white")
     plt.close(fig)
 
+    # Single-axes comparison of the same four stages and measured grids.
+    fig, ax = plt.subplots(figsize=(9, 8))
+    overlay_stages = [
+        (transpose_coords(ref), REF_COLOR, "--"),
+        (transpose_coords(pbarrel), COLORS["barrel"], "--"),
+        (transpose_coords(pkeystone), COLORS["key"], "-."),
+        (transpose_coords(pjoint), COLORS["joint"], "--"),
+    ]
+    for stage_coords, color, linestyle in overlay_stages:
+        plot_grid(ax, stage_coords, color, linestyle, 1.6, 3, include_cross=True)
+        plot_sample_markers(ax, stage_coords, color, "s", 6)
+
+    actual_stages = [
+        (transpose_coords(actual50), "Actual real-ray grid (A=5 D, E=0°)", "#4b5563", "o"),
+        (transpose_coords(actual520), "Actual real-ray grid (A=5 D, E=20°; display axes swapped)", ACT_COLOR, "D"),
+    ]
+    for stage_coords, label, color, marker in actual_stages:
+        plot_grid(ax, stage_coords, color, "-", 1.0, 4, include_cross=True)
+        ax.scatter(stage_coords[:, 0], stage_coords[:, 1], s=34, marker=marker,
+                   facecolors="white", edgecolors=color, linewidths=1.0, zorder=8)
+
+    setup_ax(ax, lim, "P4 transformation stages overlaid\nx = physical y; y = physical x")
+    handles = [
+        Line2D([0], [0], color=REF_COLOR, ls="--", lw=1.4,
+               marker="s", markerfacecolor=REF_COLOR, label="Reference (A=0 D, E=0°)"),
+        Line2D([0], [0], color=COLORS["barrel"], ls="--", lw=1.6,
+               marker="s", markerfacecolor=COLORS["barrel"], label="Barrel + scale model (A=5 D, E=0°)"),
+        Line2D([0], [0], color=COLORS["key"], ls="-.", lw=1.6,
+               marker="s", markerfacecolor=COLORS["key"], label="Keystone model (A=5 D, E=20°)"),
+        Line2D([0], [0], color=COLORS["joint"], ls="--", lw=1.6,
+               marker="s", markerfacecolor=COLORS["joint"], label="Joint model (A=5 D, E=20°)"),
+        Line2D([0], [0], color="#4b5563", ls="-", lw=1.0, marker="o",
+               markerfacecolor="white", label="Actual grid (A=5 D, E=0°)"),
+        Line2D([0], [0], color=ACT_COLOR, ls="-", lw=1.0, marker="D",
+               markerfacecolor="white", label="Actual grid (A=5 D, E=20°)"),
+    ]
+    fig.legend(handles=handles, loc="lower center", bbox_to_anchor=(.5, .035),
+               ncol=2, frameon=False, fontsize=8.5 * FONT_SCALE)
+    fig.tight_layout(rect=(0, .22, 1, 1), pad=1.0)
+    overlay_stages_png = args.output_dir / "p4_transformation_stages_overlay.png"
+    fig.savefig(overlay_stages_png, dpi=200, facecolor="white")
+    fig.savefig(args.output_dir / "p4_transformation_stages_overlay.svg", facecolor="white")
+    plt.close(fig)
+
     # Joint-model gaze sweep at each accommodation.
     fig, axs = plt.subplots(3, 3, figsize=(15, 14))
     sweep_points = [ref]
@@ -273,15 +329,19 @@ def main():
             plot_grid(ax, visual_ref, REF_COLOR, "--", 1.0, 1)
             draw_actual(ax, visual_act)
             draw_model(ax, visual_pred, fields[:, ::-1], COLORS["joint"], "--")
+            plot_sample_markers(ax, visual_pred, COLORS["joint"], "s", 7)
+            plot_sample_markers(ax, visual_act, ACT_COLOR, "o", 8)
             setup_ax(ax, lim, f"A={av:g} D, E={tv:g} deg")
 
     handles = [
         Line2D([0], [0], color=REF_COLOR, ls="--", lw=1, label="Reference grid"),
         Line2D([0], [0], color=ACT_COLOR, ls="-", lw=1, label="Actual real-ray grid"),
         Line2D([0], [0], color=COLORS["joint"], ls="--", lw=1.6, label="Joint model"),
+        Line2D([0], [0], marker="o", color=ACT_COLOR, markerfacecolor="white", lw=0, label="Samples"),
+        Line2D([0], [0], marker="s", color=COLORS["joint"], markerfacecolor=COLORS["joint"], lw=0, label="Model points"),
     ]
-    fig.legend(handles=handles, loc="lower center", bbox_to_anchor=(.5, .035), ncol=3, frameon=False, fontsize=8.5 * FONT_SCALE)
-    fig.tight_layout(rect=(0, .09, 1, 1), pad=1.0)
+    fig.legend(handles=handles, loc="lower center", bbox_to_anchor=(.5, .035), ncol=5, frameon=False, fontsize=8.5 * FONT_SCALE)
+    fig.tight_layout(rect=(0, .12, 1, 1), pad=1.0)
     sweep_png = args.output_dir / "p4_transformation_sweep.png"
     fig.savefig(sweep_png, dpi=200, facecolor="white")
     fig.savefig(args.output_dir / "p4_transformation_sweep.svg", facecolor="white")
@@ -341,10 +401,11 @@ def main():
         f"At A=5 D, new barrel versus old joint-fit beta barrel baseline: corner RMS/max difference={barrel_change[0][0]:.6f}/{barrel_change[0][1]:.6f} um; all-nine RMS/max difference={barrel_change[2][0]:.6f}/{barrel_change[2][1]:.6f} um. Old beta={beta5:.12g} normalized; its corner calibration is retained through the previously fitted sx, sy, q, applied after the new barrel map.", "",
         "A=5 D, E=0 deg barrel prediction versus actual:", fmt_stats("New power-law barrel", new_barrel_err), fmt_stats("Old beta barrel", old_barrel_err), "",
         "A=5 D, E=20 deg joint prediction versus actual:", fmt_stats("New power barrel + saved K", new_joint_err), fmt_stats("Old beta barrel + saved K", old_joint_err), "",
-        "The four corners were used for the saved K fit; the other five native field points are checks. Predicted point markers are omitted. Every keystone panel plots x=physical y and y=physical x. The isolated keystone panel applies saved K to the unchanged reference and is not a standalone optical state. Each trace shows the outer perimeter lines and its center sample as a dot; the middle native row and column are omitted.", "",
+        "The four corners were used for the saved K fit; the other five native field points are checks. In the sweep figure, circles mark actual samples and squares mark predicted samples at all nine native field locations. Every keystone panel plots x=physical y and y=physical x. The isolated keystone panel applies saved K to the unchanged reference and is not a standalone optical state. Each trace shows the outer perimeter lines and its center sample as a dot; the middle native row and column are omitted.", "",
     ]
     (args.output_dir / "figure_notes.md").write_text("\n".join(report), encoding="utf-8")
     print(f"Main figure: {main_png}")
+    print(f"Overlay figure: {overlay_stages_png}")
     print(f"Sweep figure: {sweep_png}")
     print(fmt_stats("New power-law barrel A=5,E=0", new_barrel_err))
     print(fmt_stats("Old beta barrel A=5,E=0", old_barrel_err))

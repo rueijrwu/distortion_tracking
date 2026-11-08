@@ -93,11 +93,18 @@ The sensitivity matrix has rows $(B_i,A_i)$. Local separation requires rank two;
 The signed paraxial mirror relation
 
 $$
-\frac{1}{P}+\frac{1}{Q}=\frac{1}{F},\qquad F=-f,\quad Q=-q,
-\qquad q=\frac{fP}{P+f},\quad M=\frac{q}{P}
+\frac{1}{P}+\frac{1}{Q}=-\frac{1}{f},\qquad Q=-\frac{fP}{P+f},\qquad \mu=-\frac{Q}{P}=\frac{f}{P+f},\quad M=|\mu|.
 $$
 
-is retained only as a centered, on-axis reference relation. It is not an exact finite-field rotating-axis image solution for $G_i$.
+Here $P>0$ denotes a real object and $P<0$ a virtual object; $Q>0$ denotes a real image and $Q<0$ a virtual image. The degenerate $P=0$ and image-at-infinity $P=-f$ cases are excluded. This centered paraxial relation is not an exact finite-field rotating-axis image solution for $G_i$.
+
+For the paraxial corneal conjugate coordinate with eye rotation held fixed, translation gives
+
+$$
+\delta q=(1-\mu)\delta t.
+$$
+
+A virtual source at $P=-r$ has $Q=-r$, $\mu=-1$, and unit image-size magnitude $M=1$, therefore $\delta q=2\delta t$. Magnitude $M=1$ alone must not be used as signed $+1$ in the displacement formula. This is source-to-corneal-conjugate magnification, not relay or camera magnification; the independent SI gain $A_i$ above is not determined by size magnification alone. See the [first-order derivation](P1_MODEL_FIRST_ORDER.md) for the signed derivation and ideal-sphere numerical check.
 
 ## Current CODE V simulation configuration
 
