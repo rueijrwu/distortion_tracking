@@ -517,6 +517,56 @@ The P4 joint corner model and the separate five-angle P4 Z sweep use different L
 Source artifacts:
 
 - [Validated P1 sweep pickle](data/distortion_grid/distortion_grid.pkl) and retained analysis scripts: [P1 rotation](Script/analyze_p1_rotation_transform.py), [P1 radial/magnification](Script/fit_p1_radial_distortion.py).
-- [Validated P4 sweep pickle](data/distortion_grid_p4/distortion_grid.pkl) and retained analysis scripts: [P4 radial fit](Script/fit_p4_radial_distortion.py) (also fits the quadratic_A, offset_exponential, and power_law accommodation curves for `k1(A)`), [P4 rotation transform](Script/analyze_p4_rotation_transform.py) (pre-joint, per-accommodation), [P4 joint corner transform](Script/analyze_p4_joint_corner_transform.py) (current joint model), [composition/validation plot](Script/plot_p4_transformation_effects.py).
+- Historical validated P4 sweep (source archived; distinct from the [current P4 full-detail pickle](data/p4_raytrace/p4_raytrace_251x251_12p5_A4.pkl)) and archived analysis scripts: [P4 radial fit](Script/fit_p4_radial_distortion.py) (also fits the quadratic_A, offset_exponential, and power_law accommodation curves for `k1(A)`), [P4 rotation transform](Script/analyze_p4_rotation_transform.py) (pre-joint, per-accommodation), [P4 joint corner transform](Script/analyze_p4_joint_corner_transform.py) (historical joint model), [composition/validation plot](Script/plot_p4_transformation_effects.py).
 - [Separate P4 Z magnification report](data/p4_z_magnification/p4_z_magnification.md), [plot](data/p4_z_magnification/p4_z_magnification.png), [structured grid](data/p4_z_magnification/p4_z_magnification.pkl), [metadata](data/p4_z_magnification/metadata.json), [fit artifact](data/p4_z_magnification/p4_z_magnification_fit.pkl), and [script](Script/analyze_p4_z_magnification.py).
 - [Summary.md](Summary.md) for data provenance, hashes, and the candidate absolute-coordinate composition.
+
+## Camera-side lens model (p1_camera_fit)
+
+The camera-side fit in [Script/p1_camera_fit.py](Script/p1_camera_fit.py) models traced image coordinates $(x,y)$ from the direction cosines at surface 8. Define physical tangent inputs $t_{x}=\frac{l_{8}}{n_{8}}$ and $t_{y}=\frac{m_{8}}{n_{8}}$. On the training set, let $T=\max(|t_{x}|,|t_{y}|)$ over all training rays, then normalize as $u=\frac{t_{x}}{T}$ and $v=\frac{t_{y}}{T}$. The fit uses the full-grid interleaved training/holdout split recorded in [runs/p1_camera_fit_v2/summary.json](runs/p1_camera_fit_v2/summary.json).
+
+For parameters $f,c_{x},c_{y},k_{1},k_{2},\theta_{s},\varphi_{s},q_{1},q_{2}$, the exact forward map is
+
+$$
+t_{x}=\frac{l_{8}}{n_{8}},\qquad t_{y}=\frac{m_{8}}{n_{8}}
+$$
+
+$$
+T=\max_{\text{training rays}}\max(|t_{x}|,|t_{y}|),\qquad u=\frac{t_{x}}{T},\quad v=\frac{t_{y}}{T}
+$$
+
+$$
+r^{2}=u^{2}+v^{2}
+$$
+
+$$
+\rho=1+k_{1}\cdot r^{2}+k_{2}\cdot r^{4},\qquad u_{r}=\rho\cdot u,\quad v_{r}=\rho\cdot v
+$$
+
+$$
+s=q_{1}\cdot(u_{r}^{2}+v_{r}^{2}),\qquad u_{p}=u_{r}+s,\quad v_{p}=v_{r}+q_{2}\cdot(u_{r}^{2}+v_{r}^{2})
+$$
+
+$$
+D=1+\theta_{s}\cdot v_{p}-\varphi_{s}\cdot u_{p}
+$$
+
+$$
+x=\frac{f\cdot u_{p}}{D}+c_{x},\qquad y=\frac{f\cdot v_{p}}{D}+c_{y}
+$$
+
+The nested levels activate parameters as follows; all terms not listed for a level are zero:
+
+| Level | Active parameters |
+|---|---|
+| E0 | $f,c_{x},c_{y}$ |
+| E1 | E0 plus $k_{1}$ |
+| E2 | E1 plus $k_{2}$ |
+| E3 | E2 plus $\theta_{s},\varphi_{s}$ |
+| E4 | E3 plus $q_{1},q_{2}$ |
+
+The physical-tangent coefficient conversions from normalized fit coefficients are $f_{\text{physical}}=\frac{f}{T}$, $k_{1,\text{physical}}=\frac{k_{1}}{T^{2}}$, and $k_{2,\text{physical}}=\frac{k_{2}}{T^{4}}$; each of $\theta_{s,\text{physical}}=\frac{\theta_{s}}{T}$, $\varphi_{s,\text{physical}}=\frac{\varphi_{s}}{T}$, $q_{1,\text{physical}}=\frac{q_{1}}{T}$, and $q_{2,\text{physical}}=\frac{q_{2}}{T}$ converts by division by $T$. The image center offsets $c_{x}$ and $c_{y}$ remain in millimeters.
+
+Model selection uses the smallest level whose holdout maximum Euclidean point error is at most $1\,\text{µm}$. The E1 holdout maximum is **$0.0015829611284427967\,\text{µm}$** in the saved summary. A user override selects E1 downstream (2026-11-09). E3 and E4's $\theta_{s}$, $\varphi_{s}$, $q_{1}$, and $q_{2}$ coefficients are exactly zero for this dataset: its chief rays are symmetric and the holdout is interleaved. Consequently, the data do not validate the tilt or prism terms' signs or functional forms.
+
+For implementation details and the dataset summary, see [Script/p1_camera_fit.py](Script/p1_camera_fit.py) and [runs/p1_camera_fit_v2/summary.json](runs/p1_camera_fit_v2/summary.json).
