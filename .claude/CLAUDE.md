@@ -8,6 +8,14 @@
 - **Mechanical work** (reads, runs, checks): gpt-6-luna, low effort.
 - **Sandbox failure fallback:** if a task fails because of the sandbox, use Haiku 5.5 (build/run only).
 
+## Codex commands for subagents
+- Dispatch every Codex role with `/codex:rescue --background` (the `codex:codex-rescue` agent with `run_in_background`); never wait in the foreground.
+- Planner / auditor: `/codex:rescue --background --model gpt-6-astra --effort high <task>`
+- Implementation (edit only, no execution): `/codex:rescue --background --write --model gpt-6.1-sol --effort xhigh <task>`.
+- Mechanical work (reads, runs, checks): `/codex:rescue --background --model gpt-6-luna --effort low <task>`; add `--write` when files are written.
+- Use `--fresh` for a new task; `--resume` only to continue the same task.
+- Order: plan -> implement -> audit before running -> run -> audit results.
+
 ## Plans
 - Do not create temporary or separate plan files. All plans must be consolidated into and updated in `CURRENT_PLAN.md`.
 
